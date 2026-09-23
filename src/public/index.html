@@ -396,7 +396,7 @@
       <div class="header-actions">
         <span class="badge-node">Node.js Engine</span>
         <span class="badge-api">
-          <span class="badge-pulse"></span> Auto-Sync (<span id="countdown">2</span>s)
+          <span class="badge-pulse"></span> Auto-Sync (2s)
         </span>
         <button class="btn btn-primary" onclick="openRegisterModal()">+ Register Device</button>
         <button class="btn btn-secondary" style="color: #f87171; border-color: rgba(239, 68, 68, 0.4);" onclick="openDeleteModal()">🗑️ Delete Device</button>
@@ -705,15 +705,15 @@
       await Promise.all([fetchSummary(), fetchDevices()]);
     }
 
+    // Tick local second-by-second countdown for each device
     setInterval(() => {
-      countdownSecs--;
       renderTable();
-      if (countdownSecs <= 0) {
-        countdownSecs = 2;
-        refreshAll();
-      }
-      document.getElementById('countdown').innerText = countdownSecs;
     }, 1000);
+
+    // Sync with API server every 2 seconds
+    setInterval(() => {
+      refreshAll();
+    }, 2000);
 
     refreshAll();
   </script>
