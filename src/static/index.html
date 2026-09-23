@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simnovus - Mini Device Fleet Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0b0f19;
+      --bg-card: #111827;
+      --bg-card-hover: #1f2937;
+      --border-color: #374151;
+      --text-main: #f9fafb;
+      --text-muted: #9ca3af;
+      --accent-blue: #3b82f6;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --accent-amber: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .title-group h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .title-group p {
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      margin-top: 4px;
+    }
+
+    .badge-api {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge-pulse {
+      width: 8px;
+      height: 8px;
+      background: var(--accent-green);
+      border-radius: 50%;
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn {
+      font-family: inherit;
+      font-size: 0.88rem;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--accent-blue);
+      color: white;
+    }
+    .btn-primary:hover { background: #2563eb; }
+
+    .btn-secondary {
+      background: #1f2937;
+      color: var(--text-main);
+      border-color: var(--border-color);
+    }
+    .btn-secondary:hover { background: #374151; }
+
+    /* Summary Stats Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+    }
+
+    .stat-total::before { background: var(--accent-blue); }
+    .stat-online::before { background: var(--accent-green); }
+    .stat-offline::before { background: var(--accent-red); }
+
+    .stat-label {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .stat-value {
+      font-size: 2.2rem;
+      font-weight: 700;
+      margin-top: 8px;
+      line-height: 1;
+    }
+
+    .stat-subtext {
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      margin-top: 8px;
+    }
+
+    /* Controls bar */
+    .controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .filter-tabs {
+      display: flex;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 3px;
+    }
+
+    .filter-tab {
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .filter-tab.active {
+      background: #2563eb;
+      color: #fff;
+    }
+
+    .search-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 0.85rem;
+      min-width: 240px;
+    }
+    .search-box:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+    }
+
+    /* Table */
+    .table-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th {
+      background: #172033;
+      padding: 14px 18px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    td {
+      padding: 14px 18px;
+      font-size: 0.88rem;
+      border-bottom: 1px solid rgba(55, 65, 81, 0.5);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .device-id {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      color: #93c5fd;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .status-badge.ONLINE {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .status-badge.OFFLINE {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+    .status-badge.ONLINE .dot { background: #34d399; }
+    .status-badge.OFFLINE .dot { background: #f87171; }
+
+    .telemetry-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      background: #1f2937;
+      padding: 3px 6px;
+      border-radius: 4px;
+      margin-right: 4px;
+      color: #d1d5db;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 20px;
+    }
+
+    .modal-card {
+      background: #111827;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 480px;
+      padding: 24px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
+    .form-group input {
+      width: 100%;
+      background: #1f2937;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: white;
+      font-family: inherit;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+    }
+
+    .empty-state {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title-group">
+        <h1>Mini Device Fleet Monitor</h1>
+        <p>Real-time status tracking & heartbeat monitor (30-second timeout threshold)</p>
+      </div>
+      <div class="header-actions">
+        <span class="badge-api">
+          <span class="badge-pulse"></span> Live Auto-Sync (<span id="countdown">2</span>s)
+        </span>
+        <button class="btn btn-primary" onclick="openRegisterModal()">+ Register Device</button>
+        <a href="/docs" target="_blank" class="btn btn-secondary">API Docs (Swagger)</a>
+      </div>
+    </header>
+
+    <!-- Metrics -->
+    <div class="stats-grid">
+      <div class="stat-card stat-total">
+        <div class="stat-label">Total Devices</div>
+        <div class="stat-value" id="stat-total">0</div>
+        <div class="stat-subtext">Registered across fleet</div>
+      </div>
+      <div class="stat-card stat-online">
+        <div class="stat-label">Online Devices</div>
+        <div class="stat-value" id="stat-online" style="color: var(--accent-green);">0</div>
+        <div class="stat-subtext">Heartbeat within last 30s</div>
+      </div>
+      <div class="stat-card stat-offline">
+        <div class="stat-label">Offline Devices</div>
+        <div class="stat-value" id="stat-offline" style="color: var(--accent-red);">0</div>
+        <div class="stat-subtext">No heartbeat for > 30s</div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-bar">
+      <div class="filter-tabs">
+        <button class="filter-tab active" onclick="setFilter('ALL', this)">All Devices</button>
+        <button class="filter-tab" onclick="setFilter('ONLINE', this)">Online</button>
+        <button class="filter-tab" onclick="setFilter('OFFLINE', this)">Offline</button>
+      </div>
+      <input type="text" id="search-input" class="search-box" placeholder="Filter by ID or name..." oninput="renderTable()">
+    </div>
+
+    <!-- Devices Table -->
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Device ID</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Last Heartbeat</th>
+            <th>Telemetry / Metrics</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="device-table-body">
+          <tr>
+            <td colspan="6" class="empty-state">Loading fleet devices...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Register Modal -->
+  <div id="register-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Register New Device</h3>
+        <button class="btn btn-secondary" onclick="closeRegisterModal()">✕</button>
+      </div>
+      <form id="register-form" onsubmit="handleRegister(event)">
+        <div class="form-group">
+          <label for="dev-id">Device ID</label>
+          <input type="text" id="dev-id" required placeholder="e.g. device-06">
+        </div>
+        <div class="form-group">
+          <label for="dev-name">Device Name</label>
+          <input type="text" id="dev-name" required placeholder="e.g. Temperature Sensor 06">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeRegisterModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Register</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let devices = [];
+    let currentFilter = 'ALL';
+    let countdownSecs = 2;
+
+    async function fetchSummary() {
+      try {
+        const res = await fetch('/summary');
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('stat-total').innerText = data.total;
+          document.getElementById('stat-online').innerText = data.online;
+          document.getElementById('stat-offline').innerText = data.offline;
+        }
+      } catch (err) {
+        console.error('Failed to fetch summary:', err);
+      }
+    }
+
+    async function fetchDevices() {
+      try {
+        const res = await fetch('/devices');
+        if (res.ok) {
+          devices = await res.json();
+          // Fetch details for telemetry metrics
+          renderTable();
+        }
+      } catch (err) {
+        console.error('Failed to fetch devices:', err);
+      }
+    }
+
+    function timeAgo(dateString) {
+      if (!dateString) return 'Never';
+      const now = new Date();
+      const past = new Date(dateString);
+      const diffSec = Math.floor((now - past) / 1000);
+      if (diffSec < 0) return 'Just now';
+      if (diffSec === 0) return 'Just now';
+      if (diffSec === 1) return '1s ago';
+      if (diffSec < 60) return `${diffSec}s ago`;
+      const diffMin = Math.floor(diffSec / 60);
+      return `${diffMin}m ago`;
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('device-table-body');
+      const searchQuery = (document.getElementById('search-input').value || '').toLowerCase();
+
+      const filtered = devices.filter(d => {
+        if (currentFilter !== 'ALL' && d.status !== currentFilter) return false;
+        if (searchQuery && !d.id.toLowerCase().includes(searchQuery) && !d.name.toLowerCase().includes(searchQuery)) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No matching devices found in fleet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(d => {
+        const isOnline = d.status === 'ONLINE';
+        const lastHbText = d.last_heartbeat ? `${timeAgo(d.last_heartbeat)} (${new Date(d.last_heartbeat).toLocaleTimeString()})` : 'No heartbeat received';
+        return `
+          <tr>
+            <td class="device-id">${d.id}</td>
+            <td><strong>${d.name}</strong></td>
+            <td>
+              <span class="status-badge ${d.status}">
+                <span class="dot"></span> ${d.status}
+              </span>
+            </td>
+            <td style="color: ${isOnline ? '#93c5fd' : 'var(--text-muted)'}; font-size: 0.84rem;">
+              ${lastHbText}
+            </td>
+            <td>
+              ${isOnline ? '<span class="telemetry-tag">Active 5s pulse</span>' : '<span class="telemetry-tag" style="color: #f87171;">Timeout (>30s)</span>'}
+            </td>
+            <td>
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="triggerHeartbeat('${d.id}')">⚡ Send Pulse</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function triggerHeartbeat(id) {
+      try {
+        await fetch(`/devices/${id}/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'OK', cpu_usage: 30 })
+        });
+        await refreshAll();
+      } catch (err) {
+        alert('Failed to send heartbeat: ' + err);
+      }
+    }
+
+    function setFilter(filter, el) {
+      currentFilter = filter;
+      document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+      renderTable();
+    }
+
+    function openRegisterModal() {
+      document.getElementById('register-modal').style.display = 'flex';
+      document.getElementById('dev-id').focus();
+    }
+
+    function closeRegisterModal() {
+      document.getElementById('register-modal').style.display = 'none';
+      document.getElementById('register-form').reset();
+    }
+
+    async function handleRegister(e) {
+      e.preventDefault();
+      const id = document.getElementById('dev-id').value.trim();
+      const name = document.getElementById('dev-name').value.trim();
+
+      try {
+        const res = await fetch('/devices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, name })
+        });
+        if (res.status === 201) {
+          closeRegisterModal();
+          await refreshAll();
+        } else {
+          const err = await res.json();
+          alert('Registration error: ' + (err.detail || 'Could not register'));
+        }
+      } catch (err) {
+        alert('Network error: ' + err);
+      }
+    }
+
+    async function refreshAll() {
+      await Promise.all([fetchSummary(), fetchDevices()]);
+    }
+
+    // Auto-sync timer loop
+    setInterval(() => {
+      countdownSecs--;
+      if (countdownSecs <= 0) {
+        countdownSecs = 2;
+        refreshAll();
+      }
+      document.getElementById('countdown').innerText = countdownSecs;
+    }, 1000);
+
+    // Initial load
+    refreshAll();
+  </script>
+</body>
+</html>
