@@ -621,6 +621,12 @@
     }
 
     async function triggerHeartbeat(id) {
+      const onlineCount = devices.filter(d => d.status === 'ONLINE').length;
+      const target = devices.find(d => d.id === id);
+      if (target && target.status !== 'ONLINE' && onlineCount >= 5) {
+        alert("Policy Notice: At most 5 devices can be ONLINE concurrently. To bring this device online, another device must become OFFLINE or be deleted.");
+        return;
+      }
       try {
         await fetch(`/devices/${id}/heartbeat`, {
           method: 'POST',

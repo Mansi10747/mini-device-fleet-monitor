@@ -164,10 +164,12 @@ class FleetSimulator {
         }
       }
 
+      // Count currently running simulated devices
+      let runningCount = Array.from(this.devices.values()).filter((d) => d.isRunning).length;
+
       // 2. Discover newly registered devices (e.g. added via Web UI or POST /devices)
       for (const d of serverDevices) {
         if (!this.devices.has(d.id)) {
-          console.log(`[FLEET SYNC] New device '${d.id}' (${d.name}) discovered. Starting heartbeats.`);
           const dev = new SimulatedDevice(
             d.id,
             d.name,
@@ -176,19 +178,29 @@ class FleetSimulator {
             (deletedId) => this.devices.delete(deletedId)
           );
           this.devices.set(d.id, dev);
-          dev.start();
+
+          // Policy: Cap active running devices at 5.
+          // When adding a device beyond 5 devices, only 5 devices are online (new device remains OFFLINE).
+          if (runningCount < 5) {
+            console.log(`[FLEET SYNC] Device '${d.id}' started simulation to maintain 5 online devices.`);
+            dev.start();
+            runningCount++;
+          } else {
+            console.log(`[FLEET SYNC] New device '${d.id}' registered. Retained OFFLINE (max 5 online policy).`);
+            dev.isRunning = false;
+          }
         }
       }
 
-      // 3. Ensure at least 5 devices are actively running if fleet size >= 5
-      const runningCount = Array.from(this.devices.values()).filter((d) => d.isRunning).length;
+      // 3. If runningCount dropped below 5 (e.g. after a device was deleted), promote an unstarted device
       if (runningCount < 5 && this.devices.size >= 5) {
         for (const dev of this.devices.values()) {
-          if (!dev.isRunning) {
+          if (!dev.isRunning && !dev.manuallyStopped) {
             dev.isRunning = true;
-            dev.sendHeartbeat();
-            console.log(`[FLEET POLICY] Resumed '${dev.id}' to maintain at least 5 online devices.`);
-            if (Array.from(this.devices.values()).filter((d) => d.isRunning).length >= 5) {
+            dev.start();
+            runningCount++;
+            console.log(`[FLEET POLICY] Promoted '${dev.id}' to maintain exactly 5 online devices.`);
+            if (runningCount >= 5) {
               break;
             }
           }
@@ -263,15 +275,19 @@ class FleetSimulator {
         this.shutdown();
       } else if (action === "stop") {
         if (this.devices.has(target)) {
-          this.devices.get(target).isRunning = false;
+          const dev = this.devices.get(target);
+          dev.manuallyStopped = true;
+          dev.stop();
           console.log(`[ACTION] Stopped heartbeats for '${target}'. It will turn OFFLINE in 30 seconds.`);
         } else {
           console.log(`[ERROR] Device '${target}' not found. Available: ${Array.from(this.devices.keys()).join(", ")}`);
         }
       } else if (action === "resume") {
         if (this.devices.has(target)) {
-          this.devices.get(target).isRunning = true;
-          this.devices.get(target).sendHeartbeat();
+          const dev = this.devices.get(target);
+          dev.manuallyStopped = false;
+          dev.isRunning = true;
+          dev.start();
           console.log(`[ACTION] Resumed heartbeats for '${target}'. It is now ONLINE.`);
         } else {
           console.log(`[ERROR] Device '${target}' not found.`);
