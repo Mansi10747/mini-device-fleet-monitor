@@ -569,10 +569,26 @@
             </td>
             <td>
               <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="triggerHeartbeat('${d.id}')">⚡ Send Pulse</button>
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem; color: #f87171; border-color: rgba(239, 68, 68, 0.4); margin-left: 6px;" onclick="deleteDevice('${d.id}')">🗑️ Delete</button>
             </td>
           </tr>
         `;
       }).join('');
+    }
+
+    async function deleteDevice(id) {
+      if (!confirm(`Are you sure you want to delete '${id}'?`)) return;
+      try {
+        const res = await fetch(`/devices/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          await refreshAll();
+        } else {
+          const err = await res.json();
+          alert('Delete error: ' + (err.detail || 'Could not delete device'));
+        }
+      } catch (err) {
+        alert('Network error: ' + err);
+      }
     }
 
     async function triggerHeartbeat(id) {

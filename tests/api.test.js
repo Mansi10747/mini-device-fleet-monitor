@@ -146,4 +146,25 @@ describe("REST API Integration Tests", () => {
     expect(res.body.status).toBe("healthy");
     expect(res.body.timeout_seconds).toBe(30.0);
   });
+
+  test("DELETE /devices/:id deletes a registered device", async () => {
+    await request(app).post("/devices").send({ id: "dev-to-delete", name: "Temporary" });
+
+    // Verify it exists
+    const beforeList = await request(app).get("/devices");
+    expect(beforeList.body.some((d) => d.id === "dev-to-delete")).toBe(true);
+
+    // Delete it
+    const delRes = await request(app).delete("/devices/dev-to-delete");
+    expect(delRes.status).toBe(200);
+    expect(delRes.body.device_id).toBe("dev-to-delete");
+
+    // Verify it no longer exists
+    const afterList = await request(app).get("/devices");
+    expect(afterList.body.some((d) => d.id === "dev-to-delete")).toBe(false);
+
+    // Further DELETE returns 404
+    const delAgain = await request(app).delete("/devices/dev-to-delete");
+    expect(delAgain.status).toBe(404);
+  });
 });

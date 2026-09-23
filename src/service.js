@@ -150,6 +150,22 @@ export class DeviceFleetService {
   }
 
   /**
+   * Deletes a device from the fleet.
+   * @param {string} id
+   */
+  deleteDevice(id) {
+    const existing = this.storage.getDevice(id);
+    if (!existing) {
+      throw new DeviceNotFoundError(id);
+    }
+    this.storage.deleteDevice(id);
+    return {
+      message: `Device '${id}' deleted successfully`,
+      device_id: id,
+    };
+  }
+
+  /**
    * Lists all devices with evaluated statuses.
    * @param {string} [statusFilter]
    */
