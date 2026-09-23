@@ -399,7 +399,6 @@
           <span class="badge-pulse"></span> Auto-Sync (2s)
         </span>
         <button class="btn btn-primary" onclick="openRegisterModal()">+ Register Device</button>
-        <button class="btn btn-secondary" style="color: #f87171; border-color: rgba(239, 68, 68, 0.4);" onclick="openDeleteModal()">🗑️ Delete Device</button>
       </div>
     </header>
 
@@ -473,28 +472,6 @@
         <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
           <button type="button" class="btn btn-secondary" onclick="closeRegisterModal()">Cancel</button>
           <button type="submit" class="btn btn-primary">Register</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Delete Modal -->
-  <div id="delete-modal" class="modal-overlay">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3 style="color: #f87171;">Delete a Device</h3>
-        <button class="btn btn-secondary" onclick="closeDeleteModal()">✕</button>
-      </div>
-      <form id="delete-form" onsubmit="handleModalDelete(event)">
-        <div class="form-group">
-          <label for="delete-dev-select">Select Device to Remove</label>
-          <select id="delete-dev-select" required style="width: 100%; background: #1f2937; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; color: white; font-family: inherit;">
-          </select>
-        </div>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: -6px; margin-bottom: 16px;">This will permanently remove the device and its heartbeat history from the fleet.</p>
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
-          <button type="submit" class="btn btn-secondary" style="color: #fff; background: #ef4444; border-color: #ef4444;">Delete Device</button>
         </div>
       </form>
     </div>
@@ -661,40 +638,6 @@
         } else {
           const err = await res.json();
           alert('Registration error: ' + (err.detail || err.error || 'Could not register'));
-        }
-      } catch (err) {
-        alert('Network error: ' + err);
-      }
-    }
-
-    function openDeleteModal() {
-      if (devices.length === 0) {
-        alert('There are no registered devices in the fleet to delete.');
-        return;
-      }
-      const select = document.getElementById('delete-dev-select');
-      select.innerHTML = devices.map(d => `<option value="${d.id}">${d.id} — ${d.name} (${d.status})</option>`).join('');
-      document.getElementById('delete-modal').style.display = 'flex';
-    }
-
-    function closeDeleteModal() {
-      document.getElementById('delete-modal').style.display = 'none';
-      document.getElementById('delete-form').reset();
-    }
-
-    async function handleModalDelete(e) {
-      e.preventDefault();
-      const id = document.getElementById('delete-dev-select').value;
-      if (!id) return;
-
-      try {
-        const res = await fetch(`/devices/${id}`, { method: 'DELETE' });
-        if (res.ok) {
-          closeDeleteModal();
-          await refreshAll();
-        } else {
-          const err = await res.json();
-          alert('Delete error: ' + (err.detail || 'Could not delete device'));
         }
       } catch (err) {
         alert('Network error: ' + err);
