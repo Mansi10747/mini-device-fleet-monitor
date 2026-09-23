@@ -8,7 +8,6 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
-    "smoke": "node test_smoke.js",
     "simulator": "node simulator/simulator.js"
   },
   "keywords": [
