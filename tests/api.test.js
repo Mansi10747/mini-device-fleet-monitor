@@ -147,24 +147,40 @@ describe("REST API Integration Tests", () => {
     expect(res.body.timeout_seconds).toBe(30.0);
   });
 
-  test("DELETE /devices/:id deletes a registered device", async () => {
-    await request(app).post("/devices").send({ id: "dev-to-delete", name: "Temporary" });
+  test("DELETE /devices/:id rejects deletion when fleet has 5 or fewer devices", async () => {
+    // Register 5 devices
+    for (let i = 1; i <= 5; i++) {
+      await request(app).post("/devices").send({ id: `d-${i}`, name: `Dev ${i}` });
+    }
 
-    // Verify it exists
-    const beforeList = await request(app).get("/devices");
-    expect(beforeList.body.some((d) => d.id === "dev-to-delete")).toBe(true);
+    // Try deleting one of them -> should fail with 400
+    const delRes = await request(app).delete("/devices/d-1");
+    expect(delRes.status).toBe(400);
+    expect(delRes.body.detail).toContain("Fleet must maintain a minimum of 5 devices");
 
-    // Delete it
-    const delRes = await request(app).delete("/devices/dev-to-delete");
+    // Fleet count should still be 5
+    const list = await request(app).get("/devices");
+    expect(list.body.length).toBe(5);
+  });
+
+  test("DELETE /devices/:id permits deletion when fleet has more than 5 devices", async () => {
+    // Register 6 devices
+    for (let i = 1; i <= 6; i++) {
+      await request(app).post("/devices").send({ id: `d-${i}`, name: `Dev ${i}` });
+    }
+
+    // Delete device 6 -> succeeds with 200
+    const delRes = await request(app).delete("/devices/d-6");
     expect(delRes.status).toBe(200);
-    expect(delRes.body.device_id).toBe("dev-to-delete");
+    expect(delRes.body.device_id).toBe("d-6");
 
-    // Verify it no longer exists
-    const afterList = await request(app).get("/devices");
-    expect(afterList.body.some((d) => d.id === "dev-to-delete")).toBe(false);
+    // Fleet count should now be 5
+    const list = await request(app).get("/devices");
+    expect(list.body.length).toBe(5);
+    expect(list.body.some((d) => d.id === "d-6")).toBe(false);
 
-    // Further DELETE returns 404
-    const delAgain = await request(app).delete("/devices/dev-to-delete");
-    expect(delAgain.status).toBe(404);
+    // Deleting again when 5 devices remain should be rejected
+    const delAgain = await request(app).delete("/devices/d-5");
+    expect(delAgain.status).toBe(400);
   });
 });

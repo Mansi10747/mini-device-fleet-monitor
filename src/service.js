@@ -151,9 +151,16 @@ export class DeviceFleetService {
 
   /**
    * Deletes a device from the fleet.
+   * Only permitted when there are more than 5 devices in the fleet.
    * @param {string} id
    */
   deleteDevice(id) {
+    if (this.storage.count() <= 5) {
+      throw new ValidationError(
+        "Fleet must maintain a minimum of 5 devices. Deletion is only permitted when there are more than 5 devices."
+      );
+    }
+
     const existing = this.storage.getDevice(id);
     if (!existing) {
       throw new DeviceNotFoundError(id);

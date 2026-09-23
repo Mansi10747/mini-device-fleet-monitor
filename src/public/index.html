@@ -594,7 +594,7 @@
             </td>
             <td>
               <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="triggerHeartbeat('${d.id}')">⚡ Send Pulse</button>
-              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem; color: #f87171; border-color: rgba(239, 68, 68, 0.4); margin-left: 6px;" onclick="deleteDevice('${d.id}')">🗑️ Delete</button>
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem; color: ${devices.length <= 5 ? '#6b7280' : '#f87171'}; border-color: ${devices.length <= 5 ? '#374151' : 'rgba(239, 68, 68, 0.4)'}; margin-left: 6px; ${devices.length <= 5 ? 'opacity: 0.6;' : ''}" title="${devices.length <= 5 ? 'Minimum 5 devices required in fleet' : 'Delete device'}" onclick="deleteDevice('${d.id}')">🗑️ Delete</button>
             </td>
           </tr>
         `;
@@ -602,6 +602,10 @@
     }
 
     async function deleteDevice(id) {
+      if (devices.length <= 5) {
+        alert("Cannot delete device: The fleet must maintain a minimum of 5 devices! Deletion is only permitted when there are more than 5 devices in the fleet.");
+        return;
+      }
       if (!confirm(`Are you sure you want to delete '${id}'?`)) return;
       try {
         const res = await fetch(`/devices/${id}`, { method: 'DELETE' });
