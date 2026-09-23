@@ -284,6 +284,18 @@
       color: #93c5fd;
     }
 
+    .device-link {
+      color: #93c5fd;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .device-link:hover {
+      color: #60a5fa;
+    }
+
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -477,6 +489,19 @@
     </div>
   </div>
 
+  <!-- Device Details Modal -->
+  <div id="details-modal" class="modal-overlay" onclick="handleDetailsBackdropClick(event)">
+    <div class="modal-card" style="max-width: 440px;" onclick="event.stopPropagation()">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 16px;">
+        <h3 style="font-size: 1.15rem; font-weight: 600;">Device Details</h3>
+        <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.85rem;" onclick="closeDetailsModal()">✕</button>
+      </div>
+      <div id="details-content">
+        <div style="text-align: center; color: var(--text-muted); padding: 20px;">Loading details...</div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let devices = [];
     let currentFilter = 'ALL';
@@ -554,7 +579,7 @@
         const lastHbText = d.last_heartbeat ? `${timeAgo(d.last_heartbeat)} (${new Date(d.last_heartbeat).toLocaleTimeString()})` : 'Never';
         return `
           <tr>
-            <td class="device-id">${d.id}</td>
+            <td class="device-id"><a href="javascript:void(0)" onclick="openDetailsModal('${d.id}')" class="device-link" title="Click to view device details">${d.id}</a></td>
             <td><strong>${d.name}</strong></td>
             <td>
               <span class="status-badge ${d.status}">
@@ -619,6 +644,105 @@
     function closeRegisterModal() {
       document.getElementById('register-modal').style.display = 'none';
       document.getElementById('register-form').reset();
+    }
+
+    async function openDetailsModal(id) {
+      const modal = document.getElementById('details-modal');
+      const content = document.getElementById('details-content');
+      modal.style.display = 'flex';
+      content.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 24px;">Loading details...</div>';
+
+      try {
+        const res = await fetch(`/devices/${id}`);
+        if (!res.ok) {
+          content.innerHTML = `<div style="color: #f87171; text-align: center; padding: 24px;">Device '${id}' not found</div>`;
+          return;
+        }
+        const d = await res.json();
+        const isOnline = d.status === 'ONLINE';
+        const statusColor = isOnline ? '#34d399' : '#f87171';
+
+        let lastHbText = 'Never';
+        if (d.last_heartbeat) {
+          const diffSec = Math.floor((new Date() - new Date(d.last_heartbeat)) / 1000);
+          if (diffSec <= 1) lastHbText = '1 second ago';
+          else if (diffSec < 60) lastHbText = `${diffSec} seconds ago`;
+          else if (diffSec < 3600) lastHbText = `${Math.floor(diffSec / 60)} minutes ago`;
+          else lastHbText = `${Math.floor(diffSec / 3600)} hours ago`;
+        }
+
+        const t = d.latest_telemetry || {};
+        const cpuStr = t.cpu_usage != null ? `${t.cpu_usage}%` : 'N/A';
+        const memStr = t.memory_usage != null ? `${t.memory_usage}%` : 'N/A';
+        const batStr = t.battery_level != null ? `${t.battery_level}%` : 'N/A';
+        const sigStr = t.signal_strength != null ? `${t.signal_strength} dBm` : 'N/A';
+
+        content.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 14px; font-size: 0.92rem; padding: 4px 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-muted); min-width: 140px;">Device ID</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #93c5fd;">${d.id}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-muted); min-width: 140px;">Name</span>
+              <span style="font-weight: 500;">${d.name}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-muted); min-width: 140px;">Status</span>
+              <span style="font-weight: 600; color: ${statusColor}; display: inline-flex; align-items: center; gap: 6px;">
+                <span style="font-size: 0.9rem;">●</span> ${d.status}
+              </span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-muted); min-width: 140px;">Last heartbeat</span>
+              <span style="color: ${isOnline ? '#93c5fd' : 'var(--text-muted)'};">${lastHbText}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-muted); min-width: 140px;">Heartbeats</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${d.heartbeat_count || 0}</span>
+            </div>
+
+            <div style="margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--border-color);">
+              <div style="font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; margin-bottom: 12px;">
+                Latest Telemetry
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: var(--text-muted); min-width: 140px;">CPU Usage</span>
+                  <span style="font-family: 'JetBrains Mono', monospace;">${cpuStr}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: var(--text-muted); min-width: 140px;">Memory</span>
+                  <span style="font-family: 'JetBrains Mono', monospace;">${memStr}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: var(--text-muted); min-width: 140px;">Battery</span>
+                  <span style="font-family: 'JetBrains Mono', monospace;">${batStr}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: var(--text-muted); min-width: 140px;">Signal</span>
+                  <span style="font-family: 'JetBrains Mono', monospace;">${sigStr}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+            <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.85rem;" onclick="closeDetailsModal()">Close</button>
+          </div>
+        `;
+      } catch (err) {
+        content.innerHTML = `<div style="color: #f87171; text-align: center; padding: 24px;">Failed to load device details: ${err.message}</div>`;
+      }
+    }
+
+    function closeDetailsModal() {
+      document.getElementById('details-modal').style.display = 'none';
+    }
+
+    function handleDetailsBackdropClick(e) {
+      if (e.target.id === 'details-modal') {
+        closeDetailsModal();
+      }
     }
 
     async function handleRegister(e) {
