@@ -74,17 +74,6 @@ app.get("/devices/:id", (req, res, next) => {
   }
 });
 
-// Delete Device
-app.delete("/devices/:id", (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const result = fleetService.deleteDevice(id);
-    return res.status(200).json(result);
-  } catch (err) {
-    next(err);
-  }
-});
-
 // 5. Fleet Summary
 app.get("/summary", (req, res) => {
   const summary = fleetService.getSummary();

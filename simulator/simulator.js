@@ -21,7 +21,7 @@ const STOP_DEVICE_ID = getArg("--stop-device", null);
 const STOP_AFTER_SECONDS = getArg("--stop-after", null) ? parseFloat(getArg("--stop-after", "0")) : null;
 
 class SimulatedDevice {
-  constructor(id, name, baseUrl, intervalSec, onDeleted = null) {
+  constructor(id, name, baseUrl, intervalSec) {
     this.id = id;
     this.name = name;
     this.baseUrl = baseUrl;
@@ -30,7 +30,6 @@ class SimulatedDevice {
     this.heartbeatCount = 0;
     this.batteryLevel = +(85 + Math.random() * 15).toFixed(1);
     this.timer = null;
-    this.onDeleted = onDeleted;
   }
 
   async register() {
@@ -87,10 +86,6 @@ class SimulatedDevice {
           `[${now}] [HEARTBEAT #${this.heartbeatCount}] ${this.id} -> HTTP 200 ` +
           `(Status: ${data.device_status}, CPU: ${payload.cpu_usage}%, Signal: ${payload.signal_strength} dBm)`
         );
-      } else if (res.status === 404) {
-        console.log(`[${now}] [DEVICE REMOVED] ${this.id} not found on server (404). Stopping simulation.`);
-        this.stop();
-        if (this.onDeleted) this.onDeleted(this.id);
       } else {
         const text = await res.text();
         console.error(`[${now}] [HEARTBEAT FAILED] ${this.id}: ${res.status} - ${text}`);
@@ -123,7 +118,6 @@ class FleetSimulator {
   constructor() {
     this.devices = new Map();
     this.rl = null;
-    this.syncTimer = null;
   }
 
   async setup() {
@@ -136,78 +130,9 @@ class FleetSimulator {
     for (let i = 1; i <= NUM_DEVICES; i++) {
       const id = `device-${String(i).padStart(2, "0")}`;
       const name = `Simulated Sensor ${String(i).padStart(2, "0")}`;
-      const dev = new SimulatedDevice(
-        id,
-        name,
-        BASE_URL,
-        INTERVAL_SECONDS,
-        (deletedId) => this.devices.delete(deletedId)
-      );
+      const dev = new SimulatedDevice(id, name, BASE_URL, INTERVAL_SECONDS);
       this.devices.set(id, dev);
       await dev.register();
-    }
-  }
-
-  async syncFleet() {
-    try {
-      const res = await fetch(`${BASE_URL}/devices`);
-      if (!res.ok) return;
-      const serverDevices = await res.json();
-      const serverIds = new Set(serverDevices.map((d) => d.id));
-
-      // 1. Remove deleted devices
-      for (const [id, dev] of this.devices.entries()) {
-        if (!serverIds.has(id)) {
-          console.log(`[FLEET SYNC] Device '${id}' deleted from server. Stopping simulation.`);
-          dev.stop();
-          this.devices.delete(id);
-        }
-      }
-
-      // Count currently running simulated devices
-      let runningCount = Array.from(this.devices.values()).filter((d) => d.isRunning).length;
-
-      // 2. Discover newly registered devices (e.g. added via Web UI or POST /devices)
-      for (const d of serverDevices) {
-        if (!this.devices.has(d.id)) {
-          const dev = new SimulatedDevice(
-            d.id,
-            d.name,
-            BASE_URL,
-            INTERVAL_SECONDS,
-            (deletedId) => this.devices.delete(deletedId)
-          );
-          this.devices.set(d.id, dev);
-
-          // Policy: Cap active running devices at 5.
-          // When adding a device beyond 5 devices, only 5 devices are online (new device remains OFFLINE).
-          if (runningCount < 5) {
-            console.log(`[FLEET SYNC] Device '${d.id}' started simulation to maintain 5 online devices.`);
-            dev.start();
-            runningCount++;
-          } else {
-            console.log(`[FLEET SYNC] New device '${d.id}' registered. Retained OFFLINE (max 5 online policy).`);
-            dev.isRunning = false;
-          }
-        }
-      }
-
-      // 3. If runningCount dropped below 5 (e.g. after a device was deleted), promote an unstarted device
-      if (runningCount < 5 && this.devices.size >= 5) {
-        for (const dev of this.devices.values()) {
-          if (!dev.isRunning && !dev.manuallyStopped) {
-            dev.isRunning = true;
-            dev.start();
-            runningCount++;
-            console.log(`[FLEET POLICY] Promoted '${dev.id}' to maintain exactly 5 online devices.`);
-            if (runningCount >= 5) {
-              break;
-            }
-          }
-        }
-      }
-    } catch {
-      // Ignore background sync errors if server temporarily busy
     }
   }
 
@@ -251,11 +176,6 @@ class FleetSimulator {
       }, STOP_AFTER_SECONDS * 1000);
     }
 
-    // Periodic fleet sync every 3 seconds to auto-discover new devices and clean up deleted ones
-    this.syncTimer = setInterval(() => {
-      this.syncFleet();
-    }, 3000);
-
     this.startCli();
   }
 
@@ -275,19 +195,15 @@ class FleetSimulator {
         this.shutdown();
       } else if (action === "stop") {
         if (this.devices.has(target)) {
-          const dev = this.devices.get(target);
-          dev.manuallyStopped = true;
-          dev.stop();
+          this.devices.get(target).isRunning = false;
           console.log(`[ACTION] Stopped heartbeats for '${target}'. It will turn OFFLINE in 30 seconds.`);
         } else {
           console.log(`[ERROR] Device '${target}' not found. Available: ${Array.from(this.devices.keys()).join(", ")}`);
         }
       } else if (action === "resume") {
         if (this.devices.has(target)) {
-          const dev = this.devices.get(target);
-          dev.manuallyStopped = false;
-          dev.isRunning = true;
-          dev.start();
+          this.devices.get(target).isRunning = true;
+          this.devices.get(target).sendHeartbeat();
           console.log(`[ACTION] Resumed heartbeats for '${target}'. It is now ONLINE.`);
         } else {
           console.log(`[ERROR] Device '${target}' not found.`);
@@ -302,10 +218,6 @@ class FleetSimulator {
 
   shutdown() {
     console.log("\nStopping simulator...");
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
-    }
     for (const dev of this.devices.values()) {
       dev.stop();
     }

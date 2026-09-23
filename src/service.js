@@ -150,55 +150,6 @@ export class DeviceFleetService {
   }
 
   /**
-   * Deletes a device from the fleet.
-   * Only permitted when there are more than 5 devices in the fleet.
-   * @param {string} id
-   */
-  deleteDevice(id) {
-    if (this.storage.count() <= 5) {
-      throw new ValidationError(
-        "Fleet must maintain a minimum of 5 devices. Deletion is only permitted when there are more than 5 devices."
-      );
-    }
-
-    const existing = this.storage.getDevice(id);
-    if (!existing) {
-      throw new DeviceNotFoundError(id);
-    }
-    this.storage.deleteDevice(id);
-
-    // Ensure at least 5 devices in the remaining fleet are always ONLINE
-    const remaining = this.storage.listDevices();
-    let onlineCount = remaining.filter(
-      (d) => this.calculateStatus(d.last_heartbeat) === "ONLINE"
-    ).length;
-
-    if (onlineCount < 5) {
-      const now = this.clock();
-      for (const record of remaining) {
-        if (this.calculateStatus(record.last_heartbeat) !== "ONLINE") {
-          this.storage.recordHeartbeat(record.id, now, {
-            status: "OK",
-            cpu_usage: +(25 + Math.random() * 25).toFixed(1),
-            memory_usage: +(40 + Math.random() * 20).toFixed(1),
-            signal_strength: +(-70 + Math.random() * 15).toFixed(1),
-            battery_level: 95.0,
-          });
-          onlineCount += 1;
-          if (onlineCount >= 5) {
-            break;
-          }
-        }
-      }
-    }
-
-    return {
-      message: `Device '${id}' deleted successfully`,
-      device_id: id,
-    };
-  }
-
-  /**
    * Lists all devices with evaluated statuses.
    * @param {string} [statusFilter]
    */

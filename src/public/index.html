@@ -284,18 +284,6 @@
       color: #93c5fd;
     }
 
-    .device-link {
-      color: #93c5fd;
-      text-decoration: underline;
-      text-underline-offset: 3px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .device-link:hover {
-      color: #60a5fa;
-    }
-
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -396,6 +384,68 @@
       text-align: center;
       color: var(--text-muted);
     }
+
+    .device-id-link {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      color: #60a5fa;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(96, 165, 250, 0.5);
+      padding-bottom: 1px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+    .device-id-link:hover {
+      color: #93c5fd;
+      border-bottom-style: solid;
+      background: rgba(59, 130, 246, 0.1);
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+
+    .detail-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(55, 65, 81, 0.4);
+    }
+    .detail-row:last-child {
+      border-bottom: none;
+    }
+    .detail-label {
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+    .detail-value {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--text-main);
+      text-align: right;
+    }
+    .mono-val {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .detail-section-title {
+      margin-top: 18px;
+      margin-bottom: 8px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 700;
+      color: #93c5fd;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 6px;
+    }
   </style>
 </head>
 <body>
@@ -408,7 +458,7 @@
       <div class="header-actions">
         <span class="badge-node">Node.js Engine</span>
         <span class="badge-api">
-          <span class="badge-pulse"></span> Auto-Sync (2s)
+          <span class="badge-pulse"></span> Auto-Sync (<span id="countdown">2</span>s)
         </span>
         <button class="btn btn-primary" onclick="openRegisterModal()">+ Register Device</button>
       </div>
@@ -490,14 +540,14 @@
   </div>
 
   <!-- Device Details Modal -->
-  <div id="details-modal" class="modal-overlay" onclick="handleDetailsBackdropClick(event)">
-    <div class="modal-card" style="max-width: 440px;" onclick="event.stopPropagation()">
+  <div id="device-detail-modal" class="modal-overlay" onclick="if(event.target===this) closeDetailModal()">
+    <div class="modal-card" style="max-width: 440px;">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 16px;">
         <h3 style="font-size: 1.15rem; font-weight: 600;">Device Details</h3>
-        <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.85rem;" onclick="closeDetailsModal()">✕</button>
+        <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.85rem;" onclick="closeDetailModal()">✕</button>
       </div>
-      <div id="details-content">
-        <div style="text-align: center; color: var(--text-muted); padding: 20px;">Loading details...</div>
+      <div id="device-detail-content">
+        <div style="text-align: center; color: var(--text-muted); padding: 24px;">Loading device details...</div>
       </div>
     </div>
   </div>
@@ -579,7 +629,11 @@
         const lastHbText = d.last_heartbeat ? `${timeAgo(d.last_heartbeat)} (${new Date(d.last_heartbeat).toLocaleTimeString()})` : 'Never';
         return `
           <tr>
-            <td class="device-id"><a href="javascript:void(0)" onclick="openDetailsModal('${d.id}')" class="device-link" title="Click to view device details">${d.id}</a></td>
+            <td>
+              <a href="javascript:void(0)" class="device-id-link" onclick="openDeviceDetails('${d.id}')" title="Click to view details">
+                ${d.id}
+              </a>
+            </td>
             <td><strong>${d.name}</strong></td>
             <td>
               <span class="status-badge ${d.status}">
@@ -594,39 +648,13 @@
             </td>
             <td>
               <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="triggerHeartbeat('${d.id}')">⚡ Send Pulse</button>
-              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem; color: ${devices.length <= 5 ? '#6b7280' : '#f87171'}; border-color: ${devices.length <= 5 ? '#374151' : 'rgba(239, 68, 68, 0.4)'}; margin-left: 6px; ${devices.length <= 5 ? 'opacity: 0.6;' : ''}" title="${devices.length <= 5 ? 'Minimum 5 devices required in fleet' : 'Delete device'}" onclick="deleteDevice('${d.id}')">🗑️ Delete</button>
             </td>
           </tr>
         `;
       }).join('');
     }
 
-    async function deleteDevice(id) {
-      if (devices.length <= 5) {
-        alert("Cannot delete device: The fleet must maintain a minimum of 5 devices! Deletion is only permitted when there are more than 5 devices in the fleet.");
-        return;
-      }
-      if (!confirm(`Are you sure you want to delete '${id}'?`)) return;
-      try {
-        const res = await fetch(`/devices/${id}`, { method: 'DELETE' });
-        if (res.ok) {
-          await refreshAll();
-        } else {
-          const err = await res.json();
-          alert('Delete error: ' + (err.detail || 'Could not delete device'));
-        }
-      } catch (err) {
-        alert('Network error: ' + err);
-      }
-    }
-
     async function triggerHeartbeat(id) {
-      const onlineCount = devices.filter(d => d.status === 'ONLINE').length;
-      const target = devices.find(d => d.id === id);
-      if (target && target.status !== 'ONLINE' && onlineCount >= 5) {
-        alert("Policy Notice: At most 5 devices can be ONLINE concurrently. To bring this device online, another device must become OFFLINE or be deleted.");
-        return;
-      }
       try {
         await fetch(`/devices/${id}/heartbeat`, {
           method: 'POST',
@@ -656,105 +684,6 @@
       document.getElementById('register-form').reset();
     }
 
-    async function openDetailsModal(id) {
-      const modal = document.getElementById('details-modal');
-      const content = document.getElementById('details-content');
-      modal.style.display = 'flex';
-      content.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 24px;">Loading details...</div>';
-
-      try {
-        const res = await fetch(`/devices/${id}`);
-        if (!res.ok) {
-          content.innerHTML = `<div style="color: #f87171; text-align: center; padding: 24px;">Device '${id}' not found</div>`;
-          return;
-        }
-        const d = await res.json();
-        const isOnline = d.status === 'ONLINE';
-        const statusColor = isOnline ? '#34d399' : '#f87171';
-
-        let lastHbText = 'Never';
-        if (d.last_heartbeat) {
-          const diffSec = Math.floor((new Date() - new Date(d.last_heartbeat)) / 1000);
-          if (diffSec <= 1) lastHbText = '1 second ago';
-          else if (diffSec < 60) lastHbText = `${diffSec} seconds ago`;
-          else if (diffSec < 3600) lastHbText = `${Math.floor(diffSec / 60)} minutes ago`;
-          else lastHbText = `${Math.floor(diffSec / 3600)} hours ago`;
-        }
-
-        const t = d.latest_telemetry || {};
-        const cpuStr = t.cpu_usage != null ? `${t.cpu_usage}%` : 'N/A';
-        const memStr = t.memory_usage != null ? `${t.memory_usage}%` : 'N/A';
-        const batStr = t.battery_level != null ? `${t.battery_level}%` : 'N/A';
-        const sigStr = t.signal_strength != null ? `${t.signal_strength} dBm` : 'N/A';
-
-        content.innerHTML = `
-          <div style="display: flex; flex-direction: column; gap: 14px; font-size: 0.92rem; padding: 4px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-muted); min-width: 140px;">Device ID</span>
-              <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #93c5fd;">${d.id}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-muted); min-width: 140px;">Name</span>
-              <span style="font-weight: 500;">${d.name}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-muted); min-width: 140px;">Status</span>
-              <span style="font-weight: 600; color: ${statusColor}; display: inline-flex; align-items: center; gap: 6px;">
-                <span style="font-size: 0.9rem;">●</span> ${d.status}
-              </span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-muted); min-width: 140px;">Last heartbeat</span>
-              <span style="color: ${isOnline ? '#93c5fd' : 'var(--text-muted)'};">${lastHbText}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-muted); min-width: 140px;">Heartbeats</span>
-              <span style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">${d.heartbeat_count || 0}</span>
-            </div>
-
-            <div style="margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--border-color);">
-              <div style="font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; margin-bottom: 12px;">
-                Latest Telemetry
-              </div>
-              <div style="display: flex; flex-direction: column; gap: 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span style="color: var(--text-muted); min-width: 140px;">CPU Usage</span>
-                  <span style="font-family: 'JetBrains Mono', monospace;">${cpuStr}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span style="color: var(--text-muted); min-width: 140px;">Memory</span>
-                  <span style="font-family: 'JetBrains Mono', monospace;">${memStr}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span style="color: var(--text-muted); min-width: 140px;">Battery</span>
-                  <span style="font-family: 'JetBrains Mono', monospace;">${batStr}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span style="color: var(--text-muted); min-width: 140px;">Signal</span>
-                  <span style="font-family: 'JetBrains Mono', monospace;">${sigStr}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
-            <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.85rem;" onclick="closeDetailsModal()">Close</button>
-          </div>
-        `;
-      } catch (err) {
-        content.innerHTML = `<div style="color: #f87171; text-align: center; padding: 24px;">Failed to load device details: ${err.message}</div>`;
-      }
-    }
-
-    function closeDetailsModal() {
-      document.getElementById('details-modal').style.display = 'none';
-    }
-
-    function handleDetailsBackdropClick(e) {
-      if (e.target.id === 'details-modal') {
-        closeDetailsModal();
-      }
-    }
-
     async function handleRegister(e) {
       e.preventDefault();
       const id = document.getElementById('dev-id').value.trim();
@@ -778,19 +707,105 @@
       }
     }
 
-    async function refreshAll() {
-      await Promise.all([fetchSummary(), fetchDevices()]);
+    let currentDetailDeviceId = null;
+
+    async function openDeviceDetails(id) {
+      currentDetailDeviceId = id;
+      document.getElementById('device-detail-modal').style.display = 'flex';
+      await refreshDeviceDetails();
     }
 
-    // Tick local second-by-second countdown for each device
-    setInterval(() => {
-      renderTable();
-    }, 1000);
+    function closeDetailModal() {
+      currentDetailDeviceId = null;
+      document.getElementById('device-detail-modal').style.display = 'none';
+    }
 
-    // Sync with API server every 2 seconds
+    async function refreshDeviceDetails() {
+      if (!currentDetailDeviceId) return;
+      try {
+        const res = await fetch(`/devices/${currentDetailDeviceId}`);
+        if (!res.ok) return;
+        const dev = await res.json();
+        const tel = dev.latest_telemetry || {};
+        const isOnline = dev.status === 'ONLINE';
+
+        const lastHbFormatted = dev.last_heartbeat ? timeAgo(dev.last_heartbeat) : 'Never';
+        const cpuFormatted = tel.cpu_usage !== undefined ? `${tel.cpu_usage}%` : 'N/A';
+        const memFormatted = tel.memory_usage !== undefined ? `${tel.memory_usage}%` : 'N/A';
+        const batFormatted = tel.battery_level !== undefined ? `${tel.battery_level}%` : 'N/A';
+        const sigFormatted = tel.signal_strength !== undefined ? `${tel.signal_strength} dBm` : 'N/A';
+
+        const statusDotColor = isOnline ? '#34d399' : '#f87171';
+        const statusTextColor = isOnline ? '#34d399' : '#f87171';
+
+        document.getElementById('device-detail-content').innerHTML = `
+          <div class="detail-grid">
+            <div class="detail-row">
+              <span class="detail-label">Device ID</span>
+              <span class="detail-value mono-val" style="color: #93c5fd;">${dev.id}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Name</span>
+              <span class="detail-value">${dev.name}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Status</span>
+              <span class="detail-value" style="color: ${statusTextColor}; font-weight: 700;">
+                <span style="color: ${statusDotColor}; margin-right: 4px;">●</span> ${dev.status}
+              </span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Last heartbeat</span>
+              <span class="detail-value" style="color: #d1d5db;">${lastHbFormatted}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Heartbeats</span>
+              <span class="detail-value mono-val">${dev.heartbeat_count || 0}</span>
+            </div>
+          </div>
+
+          <div class="detail-section-title">Latest Telemetry</div>
+
+          <div class="detail-grid">
+            <div class="detail-row">
+              <span class="detail-label">CPU Usage</span>
+              <span class="detail-value mono-val">${cpuFormatted}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Memory</span>
+              <span class="detail-value mono-val">${memFormatted}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Battery</span>
+              <span class="detail-value mono-val">${batFormatted}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Signal</span>
+              <span class="detail-value mono-val">${sigFormatted}</span>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        console.error("Failed to fetch device details:", err);
+      }
+    }
+
+    async function refreshAll() {
+      await Promise.all([fetchSummary(), fetchDevices()]);
+      if (currentDetailDeviceId) {
+        await refreshDeviceDetails();
+      }
+    }
+
     setInterval(() => {
-      refreshAll();
-    }, 2000);
+      countdownSecs--;
+      renderTable();
+      if (countdownSecs <= 0) {
+        countdownSecs = 2;
+        refreshAll();
+      }
+      document.getElementById('countdown').innerText = countdownSecs;
+    }, 1000);
 
     refreshAll();
   </script>

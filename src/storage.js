@@ -82,15 +82,6 @@ export class DeviceStorage {
   }
 
   /**
-   * Deletes a device from storage.
-   * @param {string} id
-   * @returns {boolean} True if removed, false if not found.
-   */
-  deleteDevice(id) {
-    return this._devices.delete(id);
-  }
-
-  /**
    * Clears all stored records (useful for test isolation).
    */
   clear() {
