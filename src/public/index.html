@@ -538,7 +538,20 @@
 
       tbody.innerHTML = filtered.map(d => {
         const isOnline = d.status === 'ONLINE';
-        const lastHbText = d.last_heartbeat ? `${timeAgo(d.last_heartbeat)} (${new Date(d.last_heartbeat).toLocaleTimeString()})` : 'No heartbeat received';
+        let countdownBadge = '';
+        if (d.last_heartbeat) {
+          const diffSec = Math.floor((new Date() - new Date(d.last_heartbeat)) / 1000);
+          if (isOnline) {
+            const left = Math.max(0, 30 - diffSec);
+            countdownBadge = `<span class="telemetry-tag" style="color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3);">Timeout in ${left}s</span>`;
+          } else {
+            countdownBadge = `<span class="telemetry-tag" style="color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3);">Timeout (>30s)</span>`;
+          }
+        } else {
+          countdownBadge = `<span class="telemetry-tag" style="color: #9ca3af;">No pulse yet</span>`;
+        }
+
+        const lastHbText = d.last_heartbeat ? `${timeAgo(d.last_heartbeat)} (${new Date(d.last_heartbeat).toLocaleTimeString()})` : 'Never';
         return `
           <tr>
             <td class="device-id">${d.id}</td>
@@ -552,7 +565,7 @@
               ${lastHbText}
             </td>
             <td>
-              ${isOnline ? '<span class="telemetry-tag">Active 5s pulse</span>' : '<span class="telemetry-tag" style="color: #f87171;">Timeout (>30s)</span>'}
+              ${countdownBadge}
             </td>
             <td>
               <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="triggerHeartbeat('${d.id}')">⚡ Send Pulse</button>
@@ -621,6 +634,7 @@
 
     setInterval(() => {
       countdownSecs--;
+      renderTable();
       if (countdownSecs <= 0) {
         countdownSecs = 2;
         refreshAll();

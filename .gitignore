@@ -1,24 +1,12 @@
-# Node.js dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-.pnpm-debug.log*
-
-# Coverage / Testing
-coverage/
-.nyc_output/
-
-# Environment variables
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .env
-.env.local
-.env.production
-
-# IDE / OS
+*.log
 .DS_Store
-Thumbs.db
-.idea/
-.vscode/
-*.swp
-*.swo
