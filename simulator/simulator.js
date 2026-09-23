@@ -21,7 +21,7 @@ const STOP_DEVICE_ID = getArg("--stop-device", null);
 const STOP_AFTER_SECONDS = getArg("--stop-after", null) ? parseFloat(getArg("--stop-after", "0")) : null;
 
 class SimulatedDevice {
-  constructor(id, name, baseUrl, intervalSec) {
+  constructor(id, name, baseUrl, intervalSec, onDeleted = null) {
     this.id = id;
     this.name = name;
     this.baseUrl = baseUrl;
@@ -30,6 +30,7 @@ class SimulatedDevice {
     this.heartbeatCount = 0;
     this.batteryLevel = +(85 + Math.random() * 15).toFixed(1);
     this.timer = null;
+    this.onDeleted = onDeleted;
   }
 
   async register() {
@@ -86,6 +87,10 @@ class SimulatedDevice {
           `[${now}] [HEARTBEAT #${this.heartbeatCount}] ${this.id} -> HTTP 200 ` +
           `(Status: ${data.device_status}, CPU: ${payload.cpu_usage}%, Signal: ${payload.signal_strength} dBm)`
         );
+      } else if (res.status === 404) {
+        console.log(`[${now}] [DEVICE REMOVED] ${this.id} not found on server (404). Stopping simulation.`);
+        this.stop();
+        if (this.onDeleted) this.onDeleted(this.id);
       } else {
         const text = await res.text();
         console.error(`[${now}] [HEARTBEAT FAILED] ${this.id}: ${res.status} - ${text}`);
@@ -118,6 +123,7 @@ class FleetSimulator {
   constructor() {
     this.devices = new Map();
     this.rl = null;
+    this.syncTimer = null;
   }
 
   async setup() {
@@ -130,9 +136,66 @@ class FleetSimulator {
     for (let i = 1; i <= NUM_DEVICES; i++) {
       const id = `device-${String(i).padStart(2, "0")}`;
       const name = `Simulated Sensor ${String(i).padStart(2, "0")}`;
-      const dev = new SimulatedDevice(id, name, BASE_URL, INTERVAL_SECONDS);
+      const dev = new SimulatedDevice(
+        id,
+        name,
+        BASE_URL,
+        INTERVAL_SECONDS,
+        (deletedId) => this.devices.delete(deletedId)
+      );
       this.devices.set(id, dev);
       await dev.register();
+    }
+  }
+
+  async syncFleet() {
+    try {
+      const res = await fetch(`${BASE_URL}/devices`);
+      if (!res.ok) return;
+      const serverDevices = await res.json();
+      const serverIds = new Set(serverDevices.map((d) => d.id));
+
+      // 1. Remove deleted devices
+      for (const [id, dev] of this.devices.entries()) {
+        if (!serverIds.has(id)) {
+          console.log(`[FLEET SYNC] Device '${id}' deleted from server. Stopping simulation.`);
+          dev.stop();
+          this.devices.delete(id);
+        }
+      }
+
+      // 2. Discover newly registered devices (e.g. added via Web UI or POST /devices)
+      for (const d of serverDevices) {
+        if (!this.devices.has(d.id)) {
+          console.log(`[FLEET SYNC] New device '${d.id}' (${d.name}) discovered. Starting heartbeats.`);
+          const dev = new SimulatedDevice(
+            d.id,
+            d.name,
+            BASE_URL,
+            INTERVAL_SECONDS,
+            (deletedId) => this.devices.delete(deletedId)
+          );
+          this.devices.set(d.id, dev);
+          dev.start();
+        }
+      }
+
+      // 3. Ensure at least 5 devices are actively running if fleet size >= 5
+      const runningCount = Array.from(this.devices.values()).filter((d) => d.isRunning).length;
+      if (runningCount < 5 && this.devices.size >= 5) {
+        for (const dev of this.devices.values()) {
+          if (!dev.isRunning) {
+            dev.isRunning = true;
+            dev.sendHeartbeat();
+            console.log(`[FLEET POLICY] Resumed '${dev.id}' to maintain at least 5 online devices.`);
+            if (Array.from(this.devices.values()).filter((d) => d.isRunning).length >= 5) {
+              break;
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore background sync errors if server temporarily busy
     }
   }
 
@@ -176,6 +239,11 @@ class FleetSimulator {
       }, STOP_AFTER_SECONDS * 1000);
     }
 
+    // Periodic fleet sync every 3 seconds to auto-discover new devices and clean up deleted ones
+    this.syncTimer = setInterval(() => {
+      this.syncFleet();
+    }, 3000);
+
     this.startCli();
   }
 
@@ -218,6 +286,10 @@ class FleetSimulator {
 
   shutdown() {
     console.log("\nStopping simulator...");
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
     for (const dev of this.devices.values()) {
       dev.stop();
     }

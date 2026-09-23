@@ -183,4 +183,32 @@ describe("REST API Integration Tests", () => {
     const delAgain = await request(app).delete("/devices/d-5");
     expect(delAgain.status).toBe(400);
   });
+
+  test("DELETE /devices/:id guarantees that 5 devices always remain ONLINE after deletion", async () => {
+    // Register 6 devices
+    for (let i = 1; i <= 6; i++) {
+      await request(app).post("/devices").send({ id: `d-${i}`, name: `Dev ${i}` });
+    }
+    // Only 3 sent heartbeats originally
+    await request(app).post("/devices/d-1/heartbeat").send({});
+    await request(app).post("/devices/d-2/heartbeat").send({});
+    await request(app).post("/devices/d-3/heartbeat").send({});
+
+    // Delete d-1
+    const delRes = await request(app).delete("/devices/d-1");
+    expect(delRes.status).toBe(200);
+
+    // Fleet summary must reflect exactly 5 devices total and all 5 ONLINE
+    const summary = await request(app).get("/summary");
+    expect(summary.body.total).toBe(5);
+    expect(summary.body.online).toBe(5);
+    expect(summary.body.offline).toBe(0);
+
+    // All remaining devices must be ONLINE
+    const list = await request(app).get("/devices");
+    expect(list.body.length).toBe(5);
+    list.body.forEach((d) => {
+      expect(d.status).toBe("ONLINE");
+    });
+  });
 });

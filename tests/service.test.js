@@ -131,4 +131,53 @@ describe("DeviceFleetService Unit Tests", () => {
     expect(offlineDevices.length).toBe(1);
     expect(offlineDevices[0].id).toBe("dev-02");
   });
+
+  test("deleteDevice rejects deletion when fleet has 5 or fewer devices", () => {
+    for (let i = 1; i <= 5; i++) {
+      service.registerDevice({ id: `d-${i}`, name: `Dev ${i}` });
+    }
+    expect(storage.count()).toBe(5);
+
+    expect(() => service.deleteDevice("d-1")).toThrow(ValidationError);
+    expect(() => service.deleteDevice("d-1")).toThrow(
+      "Fleet must maintain a minimum of 5 devices"
+    );
+    expect(storage.count()).toBe(5);
+  });
+
+  test("deleteDevice permits deletion when fleet > 5 and ensures 5 devices always remain ONLINE", () => {
+    // Register 6 devices
+    for (let i = 1; i <= 6; i++) {
+      service.registerDevice({ id: `d-${i}`, name: `Dev ${i}` });
+    }
+    // Only d-1, d-2, d-3, d-4 have heartbeats initially (4 online, 2 offline)
+    service.recordHeartbeat("d-1", {});
+    service.recordHeartbeat("d-2", {});
+    service.recordHeartbeat("d-3", {});
+    service.recordHeartbeat("d-4", {});
+
+    let sBefore = service.getSummary();
+    expect(sBefore.total).toBe(6);
+    expect(sBefore.online).toBe(4);
+    expect(sBefore.offline).toBe(2);
+
+    // Delete d-1 (an online device) -> 5 devices left.
+    // The policy ensures remaining 5 devices MUST all be ONLINE!
+    const delRes = service.deleteDevice("d-1");
+    expect(delRes.message).toContain("deleted successfully");
+
+    expect(storage.count()).toBe(5);
+    const sAfter = service.getSummary();
+    expect(sAfter.total).toBe(5);
+    expect(sAfter.online).toBe(5);
+    expect(sAfter.offline).toBe(0);
+
+    // Verify all remaining devices have ONLINE status
+    const remaining = service.listDevices();
+    expect(remaining.length).toBe(5);
+    remaining.forEach((dev) => {
+      expect(dev.status).toBe("ONLINE");
+      expect(dev.last_heartbeat).not.toBeNull();
+    });
+  });
 });
