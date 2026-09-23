@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - HEARTBEAT_TIMEOUT_SECONDS=30.0
-      - HOST=0.0.0.0
       - PORT=8000
+      - HOST=0.0.0.0
+      - HEARTBEAT_TIMEOUT_SECONDS=30.0
     restart: unless-stopped

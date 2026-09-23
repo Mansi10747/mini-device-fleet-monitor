@@ -1,16 +1,17 @@
-FROM python:3.12-slim
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Prevent Python from writing .pyc and enable unbuffered logging
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+COPY package*.json ./
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN npm ci --only=production
 
 COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV PORT=8000
+ENV HOST=0.0.0.0
+ENV HEARTBEAT_TIMEOUT_SECONDS=30.0
+
+CMD ["node", "src/server.js"]

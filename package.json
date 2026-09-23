@@ -1,0 +1,35 @@
+{
+  "name": "mini-device-fleet-monitor",
+  "version": "1.0.0",
+  "description": "Mini Device Fleet Monitor for Simnovus Campus Hiring Round 2",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
+    "smoke": "node test_smoke.js",
+    "simulator": "node simulator/simulator.js"
+  },
+  "keywords": [
+    "fleet-monitor",
+    "iot",
+    "heartbeat",
+    "simnovus",
+    "express"
+  ],
+  "author": "Candidate",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "transform": {}
+  }
+}

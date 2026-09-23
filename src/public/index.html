@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simnovus - Mini Device Fleet Monitor</title>
+  <title>Simnovus - Mini Device Fleet Monitor (Node.js)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -78,6 +78,16 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
+    }
+
+    .badge-node {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
     }
 
     .badge-pulse {
@@ -384,11 +394,11 @@
         <p>Real-time status tracking & heartbeat monitor (30-second timeout threshold)</p>
       </div>
       <div class="header-actions">
+        <span class="badge-node">Node.js Engine</span>
         <span class="badge-api">
-          <span class="badge-pulse"></span> Live Auto-Sync (<span id="countdown">2</span>s)
+          <span class="badge-pulse"></span> Auto-Sync (<span id="countdown">2</span>s)
         </span>
         <button class="btn btn-primary" onclick="openRegisterModal()">+ Register Device</button>
-        <a href="/docs" target="_blank" class="btn btn-secondary">API Docs (Swagger)</a>
       </div>
     </header>
 
@@ -491,7 +501,6 @@
         const res = await fetch('/devices');
         if (res.ok) {
           devices = await res.json();
-          // Fetch details for telemetry metrics
           renderTable();
         }
       } catch (err) {
@@ -599,7 +608,7 @@
           await refreshAll();
         } else {
           const err = await res.json();
-          alert('Registration error: ' + (err.detail || 'Could not register'));
+          alert('Registration error: ' + (err.detail || err.error || 'Could not register'));
         }
       } catch (err) {
         alert('Network error: ' + err);
@@ -610,7 +619,6 @@
       await Promise.all([fetchSummary(), fetchDevices()]);
     }
 
-    // Auto-sync timer loop
     setInterval(() => {
       countdownSecs--;
       if (countdownSecs <= 0) {
@@ -620,7 +628,6 @@
       document.getElementById('countdown').innerText = countdownSecs;
     }, 1000);
 
-    // Initial load
     refreshAll();
   </script>
 </body>
