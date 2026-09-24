@@ -1,556 +1,732 @@
-# Mini Device Fleet Monitor (Node.js)
+# Mini Device Fleet Monitor
 
-[![Node.js](https://img.shields.io/badge/Node.js-v18%2B%20%7C%20v22-339933.svg?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![Express.js](https://img.shields.io/badge/Express-4.21.0-000000.svg?logo=express&logoColor=white)](https://expressjs.com/)
-[![Jest](https://img.shields.io/badge/Tested%20with-Jest-C21325.svg?logo=jest&logoColor=white)](https://jestjs.io/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/License-ISC-blue.svg)]()
+A small Node.js application for monitoring a fleet of simulated devices through periodic heartbeats.
 
-A high-performance, production-grade monitoring service developed in **Node.js** for the **Simnovus Campus Hiring Round 2** engineering assessment. The platform tracks a distributed fleet of simulated hardware/IoT devices (such as 4G/5G radio units, test probes, and lab equipment), ingests periodic heartbeat telemetry, dynamically determines operational health (`ONLINE` vs `OFFLINE`) based on a 30-second sliding timeout rule, and provides observability through REST APIs and a live web dashboard.
+This project was developed for the **Simnovus Campus Hiring Round 2**. The system registers devices, receives heartbeats and telemetry, dynamically determines whether devices are `ONLINE` or `OFFLINE` using a 30-second timeout, exposes REST APIs, provides a browser dashboard, and includes a Node.js device simulator for demonstrating failure and recovery.
+
+> **Implementation note:** The canonical implementation for this submission is **Node.js + Express**. The commands, architecture, tests, and simulator documented below refer to the Node.js implementation.
 
 ---
 
 ## Table of Contents
-1. [What the Project Does](#1-what-the-project-does)
-2. [Design and Architecture](#2-design-and-architecture)
-   - [System Context & Topology](#21-system-context--topology)
-   - [Architectural Layers](#22-architectural-layers)
-   - [Dynamic Status Resolution Engine (30s Rule)](#23-dynamic-status-resolution-engine-30s-rule)
-   - [Heartbeat Ingestion Sequence Flow](#24-heartbeat-ingestion-sequence-flow)
-   - [Timeout Evaluation Decision Flow](#25-timeout-evaluation-decision-flow)
-   - [Fault Simulation Lifecycle Flow](#26-fault-simulation-lifecycle-flow)
-   - [Concurrency, Big-O Complexity & Memory Safety](#27-concurrency-big-o-complexity--memory-safety)
-3. [Prerequisites](#3-prerequisites)
-4. [How to Build the Application](#4-how-to-build-the-application)
-5. [How to Run the Application](#5-how-to-run-the-application)
-6. [How to Run the Simulator](#6-how-to-run-the-simulator)
-7. [How to Run the Tests](#7-how-to-run-the-tests)
-8. [Example API Requests](#8-example-api-requests)
-9. [Assumptions Made](#9-assumptions-made)
-10. [Known Limitations](#10-known-limitations)
-11. [What I Would Improve With One Additional Day](#11-what-i-would-improve-with-one-additional-day)
-12. [AI Usage](#12-ai-usage)
-13. [Project Directory Structure](#13-project-directory-structure)
+
+- [1. Project Overview](#1-project-overview)
+- [2. Assignment Requirements Coverage](#2-assignment-requirements-coverage)
+- [3. Features](#3-features)
+- [4. Technology Stack](#4-technology-stack)
+- [5. Architecture](#5-architecture)
+- [6. Project Structure](#6-project-structure)
+- [7. Device Lifecycle](#7-device-lifecycle)
+- [8. Online and Offline Logic](#8-online-and-offline-logic)
+- [9. REST API](#9-rest-api)
+  - [9.1 Health Check](#91-health-check)
+  - [9.2 Register a Device](#92-register-a-device)
+  - [9.3 Send a Heartbeat](#93-send-a-heartbeat)
+  - [9.4 List Devices](#94-list-devices)
+  - [9.5 Get Device Details](#95-get-device-details)
+  - [9.6 Fleet Summary](#96-fleet-summary)
+- [10. HTTP Status Codes and Error Handling](#10-http-status-codes-and-error-handling)
+- [11. Web Dashboard](#11-web-dashboard)
+- [12. Device Simulator](#12-device-simulator)
+- [13. Testing](#13-testing)
+- [14. Installation and Setup](#14-installation-and-setup)
+- [15. Running the Application](#15-running-the-application)
+- [16. Running the Simulator](#16-running-the-simulator)
+- [17. Demonstrating the 30-Second Timeout](#17-demonstrating-the-30-second-timeout)
+- [18. API Examples](#18-api-examples)
+- [19. Configuration](#19-configuration)
+- [20. Docker](#20-docker)
+- [21. Design Decisions](#21-design-decisions)
+- [22. Assumptions](#22-assumptions)
+- [23. Known Limitations](#23-known-limitations)
+- [24. Optional Improvements](#24-optional-improvements)
+- [25. AI Usage](#25-ai-usage)
+- [26. Git and Commit History](#26-git-and-commit-history)
+- [27. Troubleshooting](#27-troubleshooting)
+- [28. Submission Checklist](#28-submission-checklist)
 
 ---
 
-## 1. What the Project Does
+# 1. Project Overview
 
-In telecommunications and distributed hardware testing (such as Simnovus test suites), edge hardware devices continuously run long-duration workloads. To maintain operational awareness, every device periodically transmits a lightweight **heartbeat** packet to a centralized monitoring server.
+The **Mini Device Fleet Monitor** is a lightweight monitoring service for a simulated fleet of devices.
 
-This project delivers:
+Each registered device periodically sends a heartbeat to the server. The server stores the most recent heartbeat and associated telemetry for every device.
 
-1. **Device Registration**:
-   - Allows network operators and automated test harnesses to onboard hardware devices using unique IDs and descriptive names via `POST /devices`.
-   - Prevents duplicate registrations with strict uniqueness constraints and HTTP `409 Conflict` responses.
+The key monitoring rule is:
 
-2. **Heartbeat & Telemetry Ingestion**:
-   - Ingests real-time heartbeat packets via `POST /devices/:id/heartbeat`.
-   - Supports ISO-8601 UTC timestamps, operational status codes (`OK`, `WARNING`, `ERROR`), and multi-dimensional telemetry (CPU load %, memory usage %, battery level %, and signal strength dBm).
+- A device is **`ONLINE`** when its most recent heartbeat is within the last **30 seconds**.
+- A device is **`OFFLINE`** when no heartbeat has ever been received or the most recent heartbeat is older than **30 seconds**.
 
-3. **Dynamic 30-Second Timeout Status Determination**:
-   - **`ONLINE`**: A valid heartbeat was received within the last **30 seconds** (`now - last_heartbeat <= 30.0s`).
-   - **`OFFLINE`**: No heartbeat has been received for more than **30 seconds**, or the device was registered but has never transmitted a heartbeat.
-   - The status is calculated dynamically on-the-fly with zero background sweeper latency.
+The status is calculated when the application is queried rather than being maintained by a separate periodic status-update job.
 
-4. **Fleet-Wide Observability**:
-   - **Fleet Summary (`GET /summary`)**: Aggregates total registered devices, online count, and offline count.
-   - **Device Inventory (`GET /devices`)**: Lists all registered devices with evaluated status and last seen timestamp, with support for status filtering (`?status=ONLINE|OFFLINE`).
-   - **Device Inspection (`GET /devices/:id`)**: Retrieves single-device telemetry, total heartbeat count, and registration metadata.
+The application consists of:
 
-5. **Multi-Device Hardware Simulator**:
-   - A standalone simulation program (`simulator/simulator.js`) modeling 5+ parallel IoT/edge devices sending heartbeats every 5 seconds.
-   - Features interactive CLI commands (`stop <id>`, `resume <id>`, `summary`, `quit`) and automated CLI flags (`--stop-device device-03 --stop-after 10`) to simulate device network disconnects and observe the 30-second `OFFLINE` transition.
-
-6. **Real-Time Web Dashboard**:
-   - Served at `http://127.0.0.1:8000/`.
-   - Features auto-syncing fleet metric cards, second-by-second countdown timers (`Timeout in 24s`), a clickable device ID modal with telemetry readout, and manual pulse injection buttons.
+1. A Node.js/Express REST API.
+2. An in-memory device repository.
+3. A domain/service layer containing the monitoring logic.
+4. A browser-based fleet dashboard.
+5. A Node.js simulator that represents at least five devices.
+6. Automated unit and API integration tests.
+7. Optional Docker support.
 
 ---
 
-## 2. Design and Architecture
+# 2. Assignment Requirements Coverage
 
-The application is structured according to **Clean Architecture** principles. Concerns are divided into distinct layers: HTTP transport, domain business logic, in-memory repository storage, and frontend presentation.
+The project requirements are implemented as follows:
 
-### 2.1. System Context & Topology
+| Requirement | Implementation |
+|---|---|
+| Register a device | `POST /devices` |
+| Receive heartbeat | `POST /devices/:id/heartbeat` |
+| List devices | `GET /devices` |
+| Get device details | `GET /devices/:id` |
+| Fleet summary | `GET /summary` |
+| 30-second timeout | Dynamic status calculation in `src/service.js` |
+| At least 5 simulated devices | `simulator/simulator.js` |
+| Stop a device and observe `OFFLINE` | Simulator `stop <device-id>` command |
+| Automated tests | Jest + Supertest |
+| Registration tests | `tests/service.test.js`, `tests/api.test.js` |
+| Heartbeat tests | `tests/service.test.js`, `tests/api.test.js` |
+| Status tests | `tests/service.test.js`, `tests/api.test.js` |
+| Exact timeout behavior | Mock-clock test at 30.0s and 30.1s |
+| README documentation | This file |
+| Meaningful Git history | Git repository history |
+| AI usage disclosure | [AI Usage](#25-ai-usage) |
 
-```mermaid
-flowchart TD
-    subgraph EdgeDevices["Simulated Hardware Fleet (simulator/simulator.js)"]
-        D1["Device 01\n(Interval: 5s)"]
-        D2["Device 02\n(Interval: 5s)"]
-        D3["Device 03\n(Interval: 5s)"]
-        D4["Device 04\n(Interval: 5s)"]
-        D5["Device 05\n(Interval: 5s)"]
-    end
-
-    subgraph Server["Monitoring Application Server (Node.js + Express)"]
-        Router["Express Router & Validation Layer\n(src/app.js)"]
-        Service["DeviceFleetService (Domain Logic)\n(src/service.js)"]
-        Store["DeviceStorage (In-Memory Repository)\n(src/storage.js)"]
-        Clock["Injectable Clock\n() => new Date()"]
-    end
-
-    subgraph UI["Operator Observability"]
-        Browser["Live Dashboard & Telemetry Modal\n(src/public/index.html)"]
-        RESTClient["External Automation / curl / Postman"]
-    end
-
-    D1 -->|"POST /devices/:id/heartbeat"| Router
-    D2 -->|"POST /devices/:id/heartbeat"| Router
-    D3 -->|"POST /devices/:id/heartbeat"| Router
-    D4 -->|"POST /devices/:id/heartbeat"| Router
-    D5 -->|"POST /devices/:id/heartbeat"| Router
-
-    Browser -->|"GET /summary, GET /devices"| Router
-    RESTClient -->|"REST APIs"| Router
-
-    Router --> Service
-    Service --> Store
-    Service --> Clock
-    Store -->|"In-Memory Map (RAM)"| Store
-```
+The assignment explicitly prioritizes a small, working, well-tested implementation over unnecessary complexity. This project therefore uses an in-memory repository and avoids introducing a database or other infrastructure that is not required for the core exercise.
 
 ---
 
-### 2.2. Architectural Layers
+# 3. Features
 
-| Layer | File | Responsibilities |
-|---|---|---|
-| **Configuration** | `src/config.js` | Centralized settings, environment variable parsing (`PORT`, `HOST`, `HEARTBEAT_TIMEOUT_SECONDS`). |
-| **Transport** | `src/app.js` | Express app, JSON body parsing, CORS middleware, route handlers, parameter validation, centralized error handling. |
-| **Server Lifecycle** | `src/server.js` | HTTP listener lifecycle, port binding, and OS signal trap handlers (`SIGINT`, `SIGTERM`) for graceful shutdown. |
-| **Domain Service** | `src/service.js` | Core business logic, status evaluation algorithm, clock abstraction, validation rules, error types. |
-| **Data Storage** | `src/storage.js` | In-memory repository utilizing JavaScript `Map`, $O(1)$ lookups, and a ring buffer for telemetry history capping. |
-| **Simulator** | `simulator/simulator.js` | Asynchronous multi-device heartbeat generator using native `fetch` and interactive `readline` CLI. |
-| **User Interface** | `src/public/index.html` | Real-time browser dashboard, live ticker loop, clickable device modal, telemetry cards. |
+## Core functionality
 
----
+- Device registration with unique IDs.
+- Input validation for device ID and name.
+- Duplicate-device detection.
+- Heartbeat ingestion.
+- Optional telemetry ingestion.
+- Dynamic `ONLINE` / `OFFLINE` status.
+- Fleet-wide status summary.
+- Individual device details.
+- Device filtering by status.
+- Device heartbeat count.
+- Latest telemetry information.
+- Bounded heartbeat history in memory.
+- Health-check endpoint.
+- Centralized HTTP error handling.
 
-### 2.3. Dynamic Status Resolution Engine (30s Rule)
+## Simulator
 
-A foundational architectural decision in this project is **Dynamic Status Evaluation vs. Background Sweeping Timers**.
+- Simulates five or more devices.
+- Sends heartbeats every five seconds by default.
+- Generates changing telemetry values.
+- Supports interactive device failure simulation.
+- Supports device recovery.
+- Supports automated fault injection from command-line arguments.
 
-```mermaid
-graph TD
-    A["Query Request Received\n(GET /devices or GET /summary)"] --> B{"Has device ever sent\na heartbeat?"}
-    B -- No --> C["Status: OFFLINE\n(Never connected)"]
-    B -- Yes --> D["Compute elapsed time:\nelapsed = now - last_heartbeat"]
-    D --> E{"elapsed <= 30,000 ms\n(<= 30.0s)"}
-    E -- Yes --> F["Status: ONLINE\n(Device healthy)"]
-    E -- No --> G["Status: OFFLINE\n(Heartbeat timed out)"]
-```
+## Dashboard
 
-#### Why Dynamic Evaluation is Superior:
-1. **Zero State Drift**: A periodic background sweeper (e.g. running every 5 seconds) introduces up to 5 seconds of latency. A device that failed at second 30.1 would falsely report `ONLINE` until second 35. Our mathematical evaluation computes status at the exact millisecond of read access.
-2. **Zero Idle CPU Overhead**: Background sweepers consume CPU cycles continuously scanning idle records. Dynamic evaluation consumes CPU only when an operator or client requests data.
-3. **Deterministic Unit Testing**: Because status is a pure function of $(now - last\_heartbeat)$, injecting a controllable mock clock allows unit tests to test the exact `30.0s` vs `30.1s` boundary instantly without `setTimeout` delays.
+The browser dashboard provides:
 
----
-
-### 2.4. Heartbeat Ingestion Sequence Flow
-
-The following sequence diagram illustrates the lifecycle of an incoming heartbeat packet:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant D as Device / Simulator
-    participant R as Express Router (app.js)
-    participant S as DeviceFleetService (service.js)
-    participant M as DeviceStorage (storage.js)
-
-    D->>R: POST /devices/device-01/heartbeat { cpu_usage: 42.3, ... }
-    Note over R: Parse JSON body & validate route params
-    R->>S: recordHeartbeat("device-01", payload)
-    S->>M: getDevice("device-01")
-    alt Device does not exist
-        M-->>S: null
-        S-->>R: throw DeviceNotFoundError (404)
-        R-->>D: HTTP 404 Not Found { error: "NotFoundError" }
-    else Device exists
-        M-->>S: Device Record
-        Note over S: Resolve timestamp (payload or clock)
-        S->>M: recordHeartbeat(id, receivedAt, telemetry)
-        M->>M: Update last_heartbeat = now<br/>Increment heartbeat_count<br/>Push telemetry to ring buffer (max 50)
-        M-->>S: Updated Record
-        S->>S: calculateStatus(last_heartbeat) -> "ONLINE"
-        S-->>R: { device_id, received_at, device_status: "ONLINE" }
-        R-->>D: HTTP 200 OK { message: "...", device_status: "ONLINE" }
-    end
-```
+- Total device count.
+- Online device count.
+- Offline device count.
+- All/Online/Offline filtering.
+- Device search.
+- Last-heartbeat display.
+- Timeout countdown.
+- Manual heartbeat/pulse action.
+- Clickable device IDs for detailed device information.
+- Telemetry display.
+- Automatic refresh.
 
 ---
 
-### 2.5. Timeout Evaluation Decision Flow
+# 4. Technology Stack
 
-When an operator queries `GET /devices` or `GET /summary`, the service iterates over the in-memory records and applies the sliding timeout window:
+| Technology | Purpose |
+|---|---|
+| Node.js | Runtime |
+| Express.js | REST API and static-file server |
+| JavaScript ES Modules | Application code |
+| `cors` | CORS middleware |
+| Jest | Automated testing |
+| Supertest | HTTP API integration testing |
+| Native `fetch` | Simulator HTTP requests |
+| HTML/CSS/JavaScript | Dashboard |
+| Docker | Optional containerized execution |
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant O as Operator / Dashboard
-    participant R as Express Router
-    participant S as DeviceFleetService
-    participant M as DeviceStorage
+## Runtime requirement
 
-    O->>R: GET /summary
-    R->>S: getSummary()
-    S->>M: listDevices()
-    M-->>S: [Record 1, Record 2, Record 3, Record 4, Record 5]
-    loop For each device record
-        S->>S: calculateStatus(record.last_heartbeat)
-        alt last_heartbeat is null
-            Note over S: status = OFFLINE
-        else now - last_heartbeat <= 30.0s
-            Note over S: status = ONLINE (increment online count)
-        else now - last_heartbeat > 30.0s
-            Note over S: status = OFFLINE (increment offline count)
-        end
-    end
-    S-->>R: { total: 5, online: 4, offline: 1 }
-    R-->>O: HTTP 200 OK { "total": 5, "online": 4, "offline": 1 }
-```
+The application requires:
+
+- **Node.js 18 or newer**
+- npm compatible with the installed Node.js version
+
+Node.js 18+ is used because the simulator relies on the built-in `fetch` API.
 
 ---
 
-### 2.6. Fault Simulation Lifecycle Flow
+# 5. Architecture
 
-How the system behaves during an operator-induced device failure:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Operator / Evaluator
-    participant Sim as Fleet Simulator
-    participant Srv as Fleet Monitor Server
-    participant UI as Web Dashboard
-
-    User->>Sim: Type command: stop device-03
-    Sim->>Sim: Halt heartbeat interval for device-03
-    Note over Sim: device-01, 02, 04, 05 continue sending pulses every 5s
-
-    loop Every 1-2 seconds (t = 0s to 30s)
-        UI->>Srv: GET /devices
-        Srv-->>UI: device-03 status: ONLINE (Timeout countdown: 28s, 20s, 10s...)
-    end
-
-    Note over Srv,UI: t = 30.1 seconds elapsed since last heartbeat
-
-    UI->>Srv: GET /devices
-    Srv->>Srv: (now - last_heartbeat) > 30s -> OFFLINE
-    Srv-->>UI: device-03 status: OFFLINE
-    Note over UI: UI flips device-03 badge to RED OFFLINE
-
-    User->>Sim: Type command: resume device-03
-    Sim->>Srv: POST /devices/device-03/heartbeat
-    Srv-->>Sim: HTTP 200 OK (device_status: ONLINE)
-    UI->>Srv: GET /devices
-    Srv-->>UI: device-03 status: ONLINE (Green badge restored)
-```
-
----
-
-### 2.7. Concurrency, Big-O Complexity & Memory Safety
-
-1. **Concurrency in Node.js**:
-   - Node.js operates on an event-driven, single-threaded event loop.
-   - Synchronous in-memory operations on the `Map` occur atomically between asynchronous I/O events, ensuring that race conditions, memory corruption, and mutex deadlocks are impossible within a single process.
-2. **Algorithmic Time Complexity**:
-   - `registerDevice(id, name)`: $\mathcal{O}(1)$ hash map lookup and insertion.
-   - `recordHeartbeat(id, payload)`: $\mathcal{O}(1)$ lookup and state update.
-   - `getDevice(id)`: $\mathcal{O}(1)$ retrieval.
-   - `listDevices()`: $\mathcal{O}(N \log N)$ where $N$ is total devices (dominated by sorting by ID for deterministic output).
-   - `getSummary()`: $\mathcal{O}(N)$ linear scan to aggregate counts.
-3. **Memory Safety (Bounded Ring Buffer)**:
-   - Hardware telemetry packets arriving every 5 seconds could cause an unbounded memory leak if stored indefinitely.
-   - `DeviceStorage` caps historical telemetry records to **50 entries per device** (`_maxHistory = 50`). When the 51st heartbeat arrives, the oldest entry is evicted ($\mathcal{O}(1)$ array shift).
-
----
-
-## 3. Prerequisites
-
-| Requirement | Supported Versions | Verified Environment |
-|---|---|---|
-| **Operating System** | Windows, macOS, Linux | Windows 11 / Linux (Alpine Docker) |
-| **Node.js** | `>= 18.0.0` | **Node.js v22.17.0** |
-| **npm** | `>= 9.0.0` | **npm 10.9.2** |
-| **Container Engine** *(Optional)* | Docker Engine `>= 20.10`, Docker Compose `>= 2.0` | Verified on Docker 26.x |
-
----
-
-## 4. How to Build the Application
-
-### Step 1: Clone Repository
-```bash
-git clone <YOUR_GIT_REPO_URL>
-cd "heartbeat simnovus"
-```
-
-### Step 2: Install Dependencies
-```bash
-npm install
-```
-
-Installed packages:
-- **`express`** (`^4.21.0`): Minimalist, robust HTTP transport framework.
-- **`cors`** (`^2.8.5`): Cross-Origin Resource Sharing middleware.
-- **`jest`** (`^29.7.0`): JavaScript test runner.
-- **`supertest`** (`^7.0.0`): Programmatic HTTP endpoint assertions.
-
-*(No compile step is necessary because the application uses standard ECMAScript Modules (`"type": "module"` in `package.json`)).*
-
----
-
-## 5. How to Run the Application
-
-### Option A: Local Node Server (Standard)
-```bash
-npm start
-```
-*Expected Console Output:*
-```text
-======================================================
-  Mini Device Fleet Monitor v1.0.0
-  Running on http://127.0.0.1:8000
-  Heartbeat Timeout Threshold: 30 seconds
-======================================================
-```
-
-### Option B: Development Mode (Auto-Reload on Code Change)
-```bash
-npm run dev
-```
-
-### Option C: Custom Environment Variables
-You can customize port, host, and timeout window via environment variables:
-```powershell
-# Windows PowerShell
-$env:PORT = "8080"
-$env:HEARTBEAT_TIMEOUT_SECONDS = "45"
-npm start
-```
-```bash
-# macOS / Linux
-PORT=8080 HEARTBEAT_TIMEOUT_SECONDS=45 npm start
-```
-
-### Option D: Docker & Docker Compose
-```bash
-# Using Docker directly
-docker build -t mini-fleet-monitor .
-docker run -p 8000:8000 mini-fleet-monitor
-
-# Using Docker Compose
-docker-compose up --build
-```
-
----
-
-## 6. How to Run the Simulator
-
-Open a **separate terminal window** while the application server is running on port 8000.
-
-### 6.1. Standard Interactive Mode
-```bash
-npm run simulator
-```
-or:
-```bash
-node simulator/simulator.js
-```
-
-The simulator will:
-1. Automatically register 5 devices: `device-01` through `device-05`.
-2. Begin sending heartbeats every 5 seconds with sensor telemetry.
+The application is divided into simple layers so that HTTP handling, business logic, and storage are not tightly coupled.
 
 ```text
-=== Mini Device Fleet Simulator (Node.js) ===
-Target API: http://127.0.0.1:8000
-Simulated Devices: 5
-Heartbeat Interval: 5s
----------------------------------------------
-[04:28:44] [REGISTERED] device-01 (Simulated Sensor 01)
-[04:28:44] [REGISTERED] device-02 (Simulated Sensor 02)
-[04:28:44] [REGISTERED] device-03 (Simulated Sensor 03)
-[04:28:44] [REGISTERED] device-04 (Simulated Sensor 04)
-[04:28:44] [REGISTERED] device-05 (Simulated Sensor 05)
+                         ┌──────────────────────┐
+                         │  Simulated Devices   │
+                         │  simulator.js        │
+                         └──────────┬───────────┘
+                                    │
+                                    │ POST heartbeat
+                                    ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Express Application                  │
+│                       src/app.js                        │
+│                                                         │
+│  POST /devices                                          │
+│  POST /devices/:id/heartbeat                            │
+│  GET  /devices                                          │
+│  GET  /devices/:id                                      │
+│  GET  /summary                                          │
+│  GET  /health                                           │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                           ▼
+                ┌──────────────────────┐
+                │ DeviceFleetService   │
+                │    src/service.js    │
+                │                      │
+                │ - validation         │
+                │ - heartbeat logic    │
+                │ - status calculation │
+                │ - summary            │
+                └──────────┬───────────┘
+                           │
+                           ▼
+                ┌──────────────────────┐
+                │   DeviceStorage      │
+                │   src/storage.js     │
+                │                      │
+                │ JavaScript Map       │
+                │ In-memory repository │
+                └──────────────────────┘
 
-[04:28:44] [HEARTBEAT #1] device-01 -> HTTP 200 (Status: ONLINE, CPU: 17.3%, Signal: -52.1 dBm)
-[04:28:44] [HEARTBEAT #1] device-02 -> HTTP 200 (Status: ONLINE, CPU: 12.7%, Signal: -76.8 dBm)
-...
+                           ▲
+                           │ GET /devices
+                           │ GET /summary
+                           │ GET /devices/:id
+                           │
+                ┌──────────────────────┐
+                │   Web Dashboard      │
+                │ src/public/index.html│
+                └──────────────────────┘
 ```
 
-### 6.2. Interactive CLI Commands
+## 5.1 Application layers
 
-While the simulator is running, type commands into the terminal:
+### `src/config.js`
 
-| Command | Example | Description |
-|---|---|---|
-| `stop <id>` | `stop device-03` | Halts heartbeats for `device-03`. It will transition to `OFFLINE` after 30 seconds! |
-| `resume <id>` | `resume device-03` | Resumes heartbeats for `device-03`, immediately bringing it back `ONLINE`. |
-| `summary` | `summary` | Fetches and displays the current server fleet summary. |
-| `quit` | `quit` | Gracefully shuts down all device timers and exits. |
+Centralizes configuration:
 
-### 6.3. Automated CLI Fault Injection (Hands-Free Verification)
-To automate the verification without typing:
-```bash
-node simulator/simulator.js --devices 5 --interval 5 --stop-device device-03 --stop-after 10
-```
-- Starts 5 devices.
-- At second 10, automatically stops heartbeats for `device-03`.
-- At second 40 (10s + 30s timeout), `device-03` turns `OFFLINE` on the dashboard while the other 4 stay `ONLINE`.
+- Application name.
+- Application version.
+- HTTP port.
+- Host.
+- Heartbeat timeout.
 
----
+### `src/app.js`
 
-## 7. How to Run the Tests
+Responsible for:
 
-Execute the automated test suite using Jest:
-```bash
-npm test
-```
+- Creating the Express application.
+- JSON parsing.
+- CORS.
+- Serving the dashboard.
+- Defining REST endpoints.
+- Translating domain errors into HTTP responses.
 
-### Test Suite Execution Output
+### `src/server.js`
+
+Responsible for:
+
+- Starting the HTTP server.
+- Printing startup information.
+- Handling `SIGINT`.
+- Handling `SIGTERM`.
+- Gracefully closing the HTTP server.
+
+### `src/service.js`
+
+Contains the core monitoring behavior:
+
+- Device validation.
+- Registration.
+- Duplicate detection.
+- Heartbeat handling.
+- Status calculation.
+- Device listing.
+- Device detail retrieval.
+- Fleet summary.
+
+### `src/storage.js`
+
+Provides the in-memory repository.
+
+A JavaScript `Map` is used for efficient device lookup by ID.
+
+Each device record contains information such as:
+
 ```text
-> mini-device-fleet-monitor@1.0.0 test
-> node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand
-
-PASS tests/api.test.js
-PASS tests/service.test.js
-
-Test Suites: 2 passed, 2 total
-Tests:       19 passed, 19 total
-Snapshots:   0 total
-Time:        2.041 s
-Ran all test suites.
+id
+name
+registered_at
+last_heartbeat
+heartbeat_count
+latest_telemetry
+heartbeat_history
 ```
 
-### Breakdown of Test Cases (19 Total)
-
-#### `tests/service.test.js` (Unit & Domain Logic)
-1. `registers a device successfully`: Asserts initial state, ID, name, initial `OFFLINE` status, and storage count.
-2. `throws DeviceAlreadyExistsError on duplicate ID`: Prevents duplicate registrations.
-3. `throws ValidationError on empty or missing fields`: Validates empty string and whitespace-only checks.
-4. `throws DeviceNotFoundError for heartbeat to unregistered device`: Verifies non-existent device handling.
-5. `marks newly registered device without heartbeats as OFFLINE`: Asserts `OFFLINE` before any heartbeat arrives.
-6. `evaluates exact 30-second timeout boundary with mock clock`:
-   - $t = 0\text{s}$: Heartbeat received $\rightarrow$ `ONLINE`
-   - $t = 15\text{s}$: Mid-window $\rightarrow$ `ONLINE`
-   - $t = 30.0\text{s}$: Exact inclusive boundary $\rightarrow$ `ONLINE`
-   - $t = 30.1\text{s}$: Timeout exceeded $\rightarrow$ `OFFLINE`
-   - $t = 60.0\text{s}$: Stale window $\rightarrow$ `OFFLINE`
-   - New pulse at $t = 60\text{s}$ $\rightarrow$ recovers back to `ONLINE`.
-7. `calculates fleet summary accurately`: Multi-device tallies across mixed online/offline states.
-8. `filters devices list by status`: Tests `ONLINE` and `OFFLINE` filtering logic.
-
-#### `tests/api.test.js` (REST Integration with Supertest)
-9. `POST /devices registers a device with 201 Created`: Verifies response schema and HTTP 201.
-10. `POST /devices returns 409 Conflict for existing device ID`: Asserts HTTP 409 conflict.
-11. `POST /devices returns 400 Bad Request on invalid input`: Asserts HTTP 400 for bad payloads.
-12. `POST /devices/:id/heartbeat records heartbeat and sets ONLINE`: Asserts HTTP 200 and telemetry ingestion.
-13. `POST /devices/:id/heartbeat returns 404 for unknown device`: Asserts HTTP 404.
-14. `GET /devices lists all registered devices`: Asserts array output with calculated statuses.
-15. `GET /devices?status=ONLINE filters properly`: Validates query filtering.
-16. `GET /devices/:id returns full details and telemetry`: Verifies telemetry fields in response.
-17. `GET /devices/:id returns 404 for non-existent device`: Asserts 404 for missing IDs.
-18. `GET /summary returns total, online, and offline counts`: Asserts exact summary dictionary.
-19. `GET /health returns health info`: Verifies service status and version.
+Telemetry history is limited to 50 entries per device.
 
 ---
 
-## 8. Example API Requests
+# 6. Project Structure
 
-All endpoints accept and return `application/json`.
+```text
+heartbeat simnovus/
+│
+├── README.md
+├── package.json
+├── package-lock.json
+├── Dockerfile
+├── docker-compose.yml
+├── .gitignore
+├── test_smoke.js
+│
+├── src/
+│   ├── app.js
+│   ├── config.js
+│   ├── server.js
+│   ├── service.js
+│   ├── storage.js
+│   │
+│   └── public/
+│       └── index.html
+│
+├── simulator/
+│   └── simulator.js
+│
+└── tests/
+    ├── api.test.js
+    └── service.test.js
+```
 
-### 1. Register a Device
+### Important note about the current archive
+
+The working archive also contains some older Python-related files. They are **not used by the Node.js package scripts, server, simulator, or Jest tests documented here**.
+
+For the final hiring submission, it is recommended to remove unused Python files so that the repository communicates one clear implementation choice: **Node.js**.
+
+---
+
+# 7. Device Lifecycle
+
+A device moves through the following logical lifecycle:
+
+```text
+             POST /devices
+                   │
+                   ▼
+          ┌─────────────────┐
+          │    REGISTERED   │
+          │    OFFLINE      │
+          └────────┬────────┘
+                   │
+                   │ heartbeat
+                   ▼
+          ┌─────────────────┐
+          │     ONLINE      │
+          └────────┬────────┘
+                   │
+             no heartbeat
+                > 30s
+                   │
+                   ▼
+          ┌─────────────────┐
+          │     OFFLINE     │
+          └────────┬────────┘
+                   │
+             new heartbeat
+                   │
+                   ▼
+          ┌─────────────────┐
+          │     ONLINE      │
+          └─────────────────┘
+```
+
+A newly registered device is `OFFLINE` because it has not yet demonstrated that it is communicating with the monitoring service.
+
+---
+
+# 8. Online and Offline Logic
+
+The timeout is configured as **30 seconds by default**.
+
+The service evaluates the most recent heartbeat:
+
+```text
+elapsed = current_time - last_heartbeat
+```
+
+Then:
+
+```text
+if no heartbeat:
+    OFFLINE
+
+if elapsed <= 30 seconds:
+    ONLINE
+
+if elapsed > 30 seconds:
+    OFFLINE
+```
+
+The implementation treats the exact 30-second boundary as `ONLINE`.
+
+Therefore:
+
+```text
+0.0 seconds  → ONLINE
+15.0 seconds → ONLINE
+30.0 seconds → ONLINE
+30.1 seconds → OFFLINE
+60.0 seconds → OFFLINE
+```
+
+When another heartbeat is received, the device immediately becomes `ONLINE` again.
+
+## Why status is calculated dynamically
+
+The project does not maintain a separate `is_online` flag using a background timer.
+
+Instead, the status is derived from the latest heartbeat whenever data is requested.
+
+This has several advantages:
+
+- No background status-sweeper is required.
+- No stale status flag needs to be synchronized.
+- The timeout boundary can be tested deterministically.
+- CPU work is performed when status information is actually requested.
+- The dashboard always receives status based on the current time.
+
+The service accepts an injectable clock, which allows the automated tests to simulate 15 seconds, 30 seconds, and 30.1 seconds without actually waiting in real time.
+
+---
+
+# 9. REST API
+
+Base URL when running locally:
+
+```text
+http://127.0.0.1:8000
+```
+
+All API payloads use JSON.
+
+---
+
+## 9.1 Health Check
+
+### Request
+
+```http
+GET /health
+```
+
+### Example
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+### Response
+
+```json
+{
+  "status": "healthy",
+  "service": "Mini Device Fleet Monitor",
+  "version": "1.0.0",
+  "timeout_seconds": 30,
+  "timestamp": "2026-09-24T10:30:00.000Z"
+}
+```
+
+This endpoint is useful for checking whether the server is running and exposing the active timeout configuration.
+
+---
+
+## 9.2 Register a Device
+
+### Endpoint
+
+```http
+POST /devices
+```
+
+### Request body
+
+```json
+{
+  "id": "device-01",
+  "name": "Lab Device 01"
+}
+```
+
+### Example
+
 ```bash
 curl -X POST http://127.0.0.1:8000/devices \
   -H "Content-Type: application/json" \
-  -d '{"id": "device-01", "name": "Lab Device 01"}'
+  -d '{"id":"device-01","name":"Lab Device 01"}'
 ```
-**Response (`201 Created`):**
+
+### Successful response
+
+HTTP status:
+
+```text
+201 Created
+```
+
+Example:
+
 ```json
 {
   "id": "device-01",
   "name": "Lab Device 01",
   "status": "OFFLINE",
-  "registered_at": "2026-09-24T04:28:44.123Z",
+  "registered_at": "2026-09-24T10:30:00.000Z",
   "last_heartbeat": null
 }
 ```
 
-### 2. Send Heartbeat
+A device starts as `OFFLINE` until its first heartbeat is received.
+
+### Validation
+
+The device ID must be a non-empty string.
+
+The device name must be a non-empty string.
+
+Whitespace is trimmed.
+
+### Duplicate ID
+
+Registering the same ID twice returns:
+
+```text
+409 Conflict
+```
+
+---
+
+# 9.3 Send a Heartbeat
+
+### Endpoint
+
+```http
+POST /devices/:id/heartbeat
+```
+
+### Request body
+
+The basic heartbeat can contain:
+
+```json
+{
+  "timestamp": "2026-09-24T10:30:10.000Z",
+  "status": "OK"
+}
+```
+
+Telemetry fields supported by the current implementation include:
+
+```json
+{
+  "timestamp": "2026-09-24T10:30:10.000Z",
+  "status": "OK",
+  "cpu_usage": 42.3,
+  "memory_usage": 61.2,
+  "battery_level": 94.0,
+  "signal_strength": -71.0
+}
+```
+
+### Example
+
 ```bash
 curl -X POST http://127.0.0.1:8000/devices/device-01/heartbeat \
   -H "Content-Type: application/json" \
   -d '{
-    "timestamp": "2026-09-24T04:28:50.000Z",
-    "status": "OK",
-    "cpu_usage": 42.3,
-    "memory_usage": 61.2,
-    "battery_level": 94.0,
-    "signal_strength": -71.0
+    "status":"OK",
+    "cpu_usage":42.3,
+    "memory_usage":61.2,
+    "battery_level":94,
+    "signal_strength":-71
   }'
 ```
-**Response (`200 OK`):**
+
+### Successful response
+
+HTTP status:
+
+```text
+200 OK
+```
+
+Example:
+
 ```json
 {
   "message": "Heartbeat recorded successfully",
   "device_id": "device-01",
-  "received_at": "2026-09-24T04:28:50.000Z",
+  "received_at": "2026-09-24T10:30:10.000Z",
   "device_status": "ONLINE"
 }
 ```
 
-### 3. List All Devices
+### Unknown device
+
+Sending a heartbeat for an unregistered device returns:
+
+```text
+404 Not Found
+```
+
+The device must be registered before it can send a heartbeat.
+
+---
+
+# 9.4 List Devices
+
+### Endpoint
+
+```http
+GET /devices
+```
+
+### Example
+
 ```bash
 curl http://127.0.0.1:8000/devices
 ```
-**Response (`200 OK`):**
+
+### Response
+
 ```json
 [
   {
     "id": "device-01",
     "name": "Lab Device 01",
     "status": "ONLINE",
-    "last_heartbeat": "2026-09-24T04:28:50.000Z"
+    "last_heartbeat": "2026-09-24T10:30:10.000Z"
+  },
+  {
+    "id": "device-02",
+    "name": "Lab Device 02",
+    "status": "OFFLINE",
+    "last_heartbeat": null
   }
 ]
 ```
 
-*Filter by Status:*
+Devices are sorted by ID for deterministic output.
+
+## Filter by status
+
+The API supports:
+
+```http
+GET /devices?status=ONLINE
+```
+
+or:
+
+```http
+GET /devices?status=OFFLINE
+```
+
+Example:
+
 ```bash
 curl "http://127.0.0.1:8000/devices?status=ONLINE"
 ```
 
-### 4. Get Device Details
+---
+
+# 9.5 Get Device Details
+
+### Endpoint
+
+```http
+GET /devices/:id
+```
+
+### Example
+
 ```bash
 curl http://127.0.0.1:8000/devices/device-01
 ```
-**Response (`200 OK`):**
+
+### Response
+
 ```json
 {
   "id": "device-01",
   "name": "Lab Device 01",
   "status": "ONLINE",
-  "registered_at": "2026-09-24T04:28:44.123Z",
-  "last_heartbeat": "2026-09-24T04:28:50.000Z",
+  "registered_at": "2026-09-24T10:30:00.000Z",
+  "last_heartbeat": "2026-09-24T10:30:10.000Z",
   "heartbeat_count": 1,
   "latest_telemetry": {
     "status": "OK",
     "cpu_usage": 42.3,
     "memory_usage": 61.2,
-    "battery_level": 94.0,
-    "signal_strength": -71.0
+    "battery_level": 94,
+    "signal_strength": -71
   }
 }
 ```
 
-### 5. Fleet Summary
+If the device does not exist:
+
+```text
+404 Not Found
+```
+
+The dashboard uses this endpoint when the operator opens the device details view.
+
+---
+
+# 9.6 Fleet Summary
+
+### Endpoint
+
+```http
+GET /summary
+```
+
+### Example
+
 ```bash
 curl http://127.0.0.1:8000/summary
 ```
-**Response (`200 OK`):**
+
+### Response
+
 ```json
 {
   "total": 5,
@@ -559,77 +735,1072 @@ curl http://127.0.0.1:8000/summary
 }
 ```
 
----
-
-## 9. Assumptions Made
-
-1. **Dynamic Evaluation Over Stored State**: Device status is calculated dynamically upon query rather than being stored as a mutable database column updated by periodic sweeper threads.
-2. **UTC Time Base & Client Jitter**: All timestamps are parsed as UTC ISO-8601 strings. If a client transmits a timestamp slightly ahead of server time due to network latency/clock skew (up to 5 seconds into the future), it is treated as `ONLINE` rather than an invalid negative elapsed duration. If omitted, the server's current UTC timestamp is assigned.
-3. **Storage Persistence**: For the scope of this 3-hour evaluation, an in-memory `Map` was chosen. This ensures sub-millisecond throughput with zero external database configuration requirements for the evaluator.
-4. **Initial Device State**: A newly registered device that has never transmitted a heartbeat is defined as `OFFLINE` until its initial heartbeat arrives.
-5. **Single Process Runtime**: The service is designed as a standalone Node.js service running on a single event loop.
+The counts are calculated from the current status of every registered device.
 
 ---
 
-## 10. Known Limitations
+# 10. HTTP Status Codes and Error Handling
 
-1. **Volatile Memory**: Stopping or restarting the server process clears all registered devices and telemetry history.
-2. **Horizontal Clustering**: If running multiple instances across cluster workers (`pm2 cluster` or Kubernetes replicas), an external shared memory store (such as Redis) is required so worker nodes share identical heartbeat state.
-3. **Telemetry History Cap**: To prevent unbounded memory consumption during extended runs, each device retains only its latest 50 heartbeat entries in memory.
+The application uses centralized error handling.
+
+| Situation | HTTP status |
+|---|---:|
+| Successful registration | `201` |
+| Successful heartbeat | `200` |
+| Successful GET request | `200` |
+| Invalid device data | `400` |
+| Duplicate device ID | `409` |
+| Unknown device | `404` |
+| Unexpected server error | `500` |
+
+Example validation error:
+
+```json
+{
+  "error": "ValidationError",
+  "detail": "Device ID must be a non-empty string"
+}
+```
+
+Example duplicate registration:
+
+```json
+{
+  "error": "ConflictError",
+  "detail": "Device with ID 'device-01' already exists"
+}
+```
+
+Example unknown device:
+
+```json
+{
+  "error": "NotFoundError",
+  "detail": "Device with ID 'device-99' not found"
+}
+```
 
 ---
 
-## 11. What I Would Improve With One Additional Day
+# 11. Web Dashboard
 
-1. **Persistent Database Layer**: Integrate SQLite (via Prisma or Drizzle ORM) for single-file embedded persistence, or PostgreSQL with TimescaleDB for historical time-series telemetry querying.
-2. **WebSocket & Server-Sent Events (SSE)**: Replace frontend 2-second HTTP polling with bi-directional WebSockets or SSE to push real-time status transitions immediately when a timeout occurs.
-3. **Configurable Alerting Webhooks**: Enable operators to configure alert webhooks (Slack/Email/PagerDuty) that trigger whenever a critical device transitions from `ONLINE` to `OFFLINE`.
-4. **Historical Telemetry Visualizations**: Embed interactive charts (Chart.js / ApexCharts) in the device detail modal showing multi-metric historical trends (CPU load spikes, battery depletion curves, signal degradation).
-5. **Security & Authentication**: Introduce API Key or Bearer Token authentication to prevent unauthorized devices from injecting forged telemetry.
+The dashboard is served directly by the Express application.
 
----
-
-## 12. AI Usage
-
-*In accordance with the Simnovus evaluation guidelines, the following discloses the use of AI tools during development:*
-
-- **AI Tools Used**: Google Gemini (via Antigravity AI Coding Assistant).
-- **What Used For**:
-  - Scaffolding the initial project architecture, Express.js routes, and Jest/Supertest test suites.
-  - Generating realistic telemetry jitter algorithms for the simulator (battery degradation curves, signal strength fluctuations).
-  - Crafting the responsive HTML/CSS dashboard and clickable device details modal popup.
-- **One Suggestion Changed / Improved**:
-  - The initial generated draft suggested a background `setInterval` loop that iterated through all devices every 5 seconds to toggle an `is_online` boolean property.
-  - **Improvement made**: I rejected the background polling sweeper approach because it creates status latency (up to 5 seconds of stale status) and wastes idle CPU cycles. Instead, I architected a pure mathematical evaluation: status is computed on-the-fly (`now - lastHeartbeat <= 30000ms`) upon every request. Furthermore, I injected a configurable `clock` dependency into `DeviceFleetService`, allowing unit tests to deterministically test the exact `30.0s` vs `30.1s` boundary in milliseconds without `setTimeout`.
-- **One Thing Personally Verified Before Submitting**:
-  - I personally executed `npm test` verifying that all 19 automated tests passed. I then started the server, launched the 5-device simulator, typed `stop device-03`, and visually verified on the dashboard that `device-03` remained `ONLINE` with the countdown timer through second 30 and flipped to `OFFLINE` at second 31 while the remaining 4 devices stayed `ONLINE`.
-
----
-
-## 13. Project Directory Structure
+Open:
 
 ```text
-heartbeat-simnovus/
-├── README.md                 # In-depth architectural & operational documentation
-├── package.json              # Project metadata, scripts, dependencies, Jest config
-├── package-lock.json         # Deterministic dependency lockfile
-├── Dockerfile                # Production Alpine Node.js container definition
-├── docker-compose.yml        # Docker Compose deployment specification
-├── .gitignore                # Source control ignore rules
-│
-├── src/
-│   ├── config.js             # Environment settings & configuration variables
-│   ├── storage.js            # In-memory storage repository (Map) with history cap
-│   ├── service.js            # Core business logic, 30s timeout engine, validation
-│   ├── app.js                # Express app, REST routes, centralized error handling
-│   ├── server.js             # HTTP listener lifecycle & graceful shutdown handlers
-│   └── public/
-│       └── index.html        # Real-time Web Dashboard with clickable modal & live countdown
-│
-├── simulator/
-│   └── simulator.js          # 5+ device simulator with interactive CLI fault injection
-│
-└── tests/
-    ├── service.test.js       # Unit tests (boundary tests, timeout rules, mock clock)
-    └── api.test.js           # REST API integration tests (Supertest)
+http://127.0.0.1:8000/
 ```
+
+The dashboard provides an operator-oriented view of the fleet.
+
+## Main dashboard sections
+
+### Fleet summary
+
+Displays:
+
+- Total devices.
+- Online devices.
+- Offline devices.
+
+### Device filters
+
+The table can be filtered by:
+
+- All devices.
+- Online devices.
+- Offline devices.
+
+### Search
+
+Devices can be searched by ID or name.
+
+### Device table
+
+The table displays:
+
+- Device ID.
+- Device name.
+- Current status.
+- Last heartbeat.
+- Telemetry/metrics.
+- Actions.
+
+### Timeout countdown
+
+For an online device, the dashboard shows the remaining time before the 30-second timeout.
+
+For example:
+
+```text
+Timeout in 26s
+```
+
+When the device stops sending heartbeats and the timeout is exceeded, the status changes to:
+
+```text
+OFFLINE
+```
+
+### Device details
+
+The device ID can be selected to view the details returned by:
+
+```http
+GET /devices/:id
+```
+
+### Manual heartbeat
+
+The `Send Pulse` action allows a heartbeat to be sent manually from the dashboard.
+
+### Automatic synchronization
+
+The dashboard periodically refreshes fleet data so that heartbeat and timeout changes are visible without manually reloading the page.
+
+---
+
+# 12. Device Simulator
+
+The simulator is implemented in:
+
+```text
+simulator/simulator.js
+```
+
+It uses Node.js native `fetch` to communicate with the monitoring server.
+
+By default it creates five devices:
+
+```text
+device-01
+device-02
+device-03
+device-04
+device-05
+```
+
+Each device sends a heartbeat every five seconds.
+
+The simulator also generates telemetry values such as:
+
+- CPU usage.
+- Memory usage.
+- Battery level.
+- Signal strength.
+
+This provides changing data for the dashboard.
+
+---
+
+# 13. Testing
+
+The project uses:
+
+- **Jest** for the test runner.
+- **Supertest** for REST API integration tests.
+
+Run:
+
+```bash
+npm test
+```
+
+The current Node.js test suite contains:
+
+```text
+2 test suites
+19 tests
+```
+
+The tests were executed against the uploaded project and currently pass:
+
+```text
+Test Suites: 2 passed, 2 total
+Tests:       19 passed, 19 total
+```
+
+## 13.1 Service/unit tests
+
+`tests/service.test.js` covers:
+
+1. Successful device registration.
+2. Duplicate device IDs.
+3. Invalid/missing device fields.
+4. Heartbeat for an unknown device.
+5. Newly registered devices being `OFFLINE`.
+6. Exact 30-second timeout behavior.
+7. Fleet summary calculation.
+8. Device status filtering.
+
+## 13.2 API integration tests
+
+`tests/api.test.js` covers:
+
+1. `POST /devices`.
+2. Duplicate registration.
+3. Invalid registration.
+4. `POST /devices/:id/heartbeat`.
+5. Unknown-device heartbeat.
+6. `GET /devices`.
+7. Online filtering.
+8. `GET /devices/:id`.
+9. Unknown device details.
+10. `GET /summary`.
+11. `GET /health`.
+
+## 13.3 Exact timeout test
+
+The test suite uses a mock clock rather than sleeping for 30 real seconds.
+
+The test verifies:
+
+```text
+t = 0s     → ONLINE
+t = 15s    → ONLINE
+t = 30.0s  → ONLINE
+t = 30.1s  → OFFLINE
+t = 60s    → OFFLINE
+new HB     → ONLINE
+```
+
+This keeps the tests fast and makes the timeout rule deterministic.
+
+---
+
+# 14. Installation and Setup
+
+## Prerequisites
+
+Install:
+
+- Node.js 18+
+- npm
+
+Verify:
+
+```bash
+node --version
+npm --version
+```
+
+Example:
+
+```text
+v22.x.x
+10.x.x
+```
+
+## Clone the repository
+
+```bash
+git clone <YOUR_REPOSITORY_URL>
+cd "heartbeat simnovus"
+```
+
+## Install dependencies
+
+```bash
+npm install
+```
+
+For a clean CI-style installation using the lockfile:
+
+```bash
+npm ci
+```
+
+---
+
+# 15. Running the Application
+
+## Start normally
+
+```bash
+npm start
+```
+
+The server listens on:
+
+```text
+http://127.0.0.1:8000
+```
+
+You should see output similar to:
+
+```text
+======================================================
+  Mini Device Fleet Monitor v1.0.0
+  Running on http://127.0.0.1:8000
+  Heartbeat Timeout Threshold: 30 seconds
+======================================================
+```
+
+Open the dashboard in a browser:
+
+```text
+http://127.0.0.1:8000/
+```
+
+## Development mode
+
+```bash
+npm run dev
+```
+
+This uses Node.js watch mode to restart the server when source files change.
+
+---
+
+# 16. Running the Simulator
+
+Keep the server running and open another terminal.
+
+Run:
+
+```bash
+npm run simulator
+```
+
+This is equivalent to:
+
+```bash
+node simulator/simulator.js
+```
+
+The simulator registers five devices and starts sending heartbeats.
+
+Expected behavior:
+
+```text
+All 5 devices are running and sending heartbeats.
+```
+
+## Interactive commands
+
+While the simulator is running:
+
+### Stop a device
+
+```text
+stop device-03
+```
+
+The simulator stops sending heartbeats for that device.
+
+### Resume a device
+
+```text
+resume device-03
+```
+
+The simulator immediately sends a new heartbeat and resumes periodic heartbeats.
+
+### View summary
+
+```text
+summary
+```
+
+### Exit
+
+```text
+quit
+```
+
+---
+
+# 17. Demonstrating the 30-Second Timeout
+
+This is the most important behavior to demonstrate during evaluation.
+
+## Step 1: Start the server
+
+```bash
+npm start
+```
+
+## Step 2: Open the dashboard
+
+```text
+http://127.0.0.1:8000/
+```
+
+## Step 3: Start the simulator
+
+In another terminal:
+
+```bash
+npm run simulator
+```
+
+You should see five devices become `ONLINE`.
+
+## Step 4: Stop one device
+
+In the simulator terminal:
+
+```text
+stop device-03
+```
+
+The simulator will stop sending heartbeats for `device-03`.
+
+The other devices continue sending heartbeats.
+
+## Step 5: Observe the countdown
+
+The dashboard continues to show `device-03` as `ONLINE` until the most recent heartbeat becomes older than 30 seconds.
+
+After the timeout:
+
+```text
+device-03 → OFFLINE
+```
+
+The fleet summary should change from:
+
+```json
+{
+  "total": 5,
+  "online": 5,
+  "offline": 0
+}
+```
+
+to:
+
+```json
+{
+  "total": 5,
+  "online": 4,
+  "offline": 1
+}
+```
+
+## Step 6: Recover the device
+
+Run:
+
+```text
+resume device-03
+```
+
+The simulator sends a heartbeat and the device becomes:
+
+```text
+ONLINE
+```
+
+again.
+
+---
+
+# 18. API Examples
+
+## Register
+
+```bash
+curl -X POST http://127.0.0.1:8000/devices \
+  -H "Content-Type: application/json" \
+  -d '{"id":"device-01","name":"Lab Device 01"}'
+```
+
+## Heartbeat
+
+```bash
+curl -X POST http://127.0.0.1:8000/devices/device-01/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status":"OK",
+    "cpu_usage":42.3,
+    "memory_usage":61.2,
+    "battery_level":94,
+    "signal_strength":-71
+  }'
+```
+
+## List devices
+
+```bash
+curl http://127.0.0.1:8000/devices
+```
+
+## Online devices only
+
+```bash
+curl "http://127.0.0.1:8000/devices?status=ONLINE"
+```
+
+## Offline devices only
+
+```bash
+curl "http://127.0.0.1:8000/devices?status=OFFLINE"
+```
+
+## Device details
+
+```bash
+curl http://127.0.0.1:8000/devices/device-01
+```
+
+## Fleet summary
+
+```bash
+curl http://127.0.0.1:8000/summary
+```
+
+## Health
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+---
+
+# 19. Configuration
+
+Configuration is controlled using environment variables.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8000` | HTTP server port |
+| `HOST` | `0.0.0.0` | Server bind address |
+| `HEARTBEAT_TIMEOUT_SECONDS` | `30.0` | Heartbeat timeout |
+
+## Linux/macOS
+
+```bash
+PORT=8080 HEARTBEAT_TIMEOUT_SECONDS=45 npm start
+```
+
+## Windows PowerShell
+
+```powershell
+$env:PORT="8080"
+$env:HEARTBEAT_TIMEOUT_SECONDS="45"
+npm start
+```
+
+Then the application will use a 45-second timeout.
+
+For the hiring assignment, the default 30-second value should normally be retained.
+
+---
+
+# 20. Docker
+
+Docker support is included as an optional deployment method.
+
+## Build
+
+```bash
+docker build -t mini-device-fleet-monitor .
+```
+
+## Run
+
+```bash
+docker run -p 8000:8000 mini-device-fleet-monitor
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000/
+```
+
+## Docker Compose
+
+```bash
+docker-compose up --build
+```
+
+The Compose configuration exposes:
+
+```text
+8000:8000
+```
+
+and sets:
+
+```text
+PORT=8000
+HOST=0.0.0.0
+HEARTBEAT_TIMEOUT_SECONDS=30.0
+```
+
+---
+
+# 21. Design Decisions
+
+## 21.1 In-memory storage
+
+The project uses a JavaScript `Map` rather than a database.
+
+Reasons:
+
+- The assignment is time-limited.
+- The required behavior does not require persistence.
+- Device lookup is simple and fast.
+- There is no external database setup for the evaluator.
+- The implementation remains easy to understand.
+
+The trade-off is that all data is lost when the process stops.
+
+## 21.2 Dynamic status calculation
+
+The application calculates status from the latest heartbeat rather than maintaining a mutable online/offline flag.
+
+This prevents the stored status from becoming stale.
+
+## 21.3 Injectable clock
+
+The service accepts a clock function:
+
+```javascript
+() => new Date()
+```
+
+Tests can replace this with a controlled clock.
+
+This makes timeout testing deterministic.
+
+## 21.4 Bounded telemetry history
+
+The storage layer keeps at most 50 telemetry history records per device.
+
+This prevents unlimited memory growth during long simulator runs.
+
+## 21.5 Separation of concerns
+
+The project separates:
+
+```text
+HTTP handling
+      ↓
+Business logic
+      ↓
+Storage
+```
+
+This makes the service easier to test independently of Express.
+
+---
+
+# 22. Assumptions
+
+1. The application runs as a single Node.js process.
+2. Device state is stored in memory.
+3. A newly registered device is `OFFLINE` until it sends a heartbeat.
+4. The 30-second boundary is inclusive:
+   - exactly 30 seconds → `ONLINE`
+   - greater than 30 seconds → `OFFLINE`
+5. Device IDs are unique.
+6. Device IDs and names must be non-empty strings.
+7. The simulator communicates with the API over HTTP.
+8. The default simulator heartbeat interval is five seconds.
+9. Telemetry fields are optional.
+10. The current deployment does not require authentication because authentication is outside the scope of the exercise.
+11. The current implementation uses an in-memory repository, so persistence across server restarts is not expected.
+12. The Node.js implementation is the submission implementation; unused legacy Python files are not part of the documented execution path.
+
+---
+
+# 23. Known Limitations
+
+## In-memory data
+
+Restarting the server clears:
+
+- Registered devices.
+- Heartbeat timestamps.
+- Telemetry.
+- Heartbeat history.
+
+## Single-process storage
+
+Multiple server instances would not share the same device state.
+
+A distributed deployment would require shared storage such as Redis or a database.
+
+## No authentication
+
+Any client that can access the server can call the device APIs.
+
+Authentication was not required by the assignment.
+
+## Polling dashboard
+
+The dashboard periodically requests current state instead of receiving push events over WebSockets/SSE.
+
+## Bounded telemetry history
+
+Only the latest 50 telemetry entries per device are retained.
+
+This is intentional to keep memory usage bounded.
+
+---
+
+# 24. Optional Improvements
+
+If additional development time were available, the following could be added.
+
+## 24.1 Persistent storage
+
+Use SQLite/PostgreSQL or another persistent database to preserve devices and telemetry across restarts.
+
+## 24.2 Real-time push updates
+
+Replace dashboard polling with WebSockets or Server-Sent Events.
+
+## 24.3 Authentication
+
+Add API keys or bearer-token authentication so only authorized devices/operators can access the service.
+
+## 24.4 Alerts
+
+Notify an operator when a device changes from `ONLINE` to `OFFLINE`.
+
+Possible integrations include:
+
+- Email.
+- Slack.
+- Webhooks.
+- Pager/incident-management systems.
+
+## 24.5 Historical telemetry charts
+
+Display CPU, memory, battery, and signal trends for an individual device.
+
+## 24.6 Structured logging
+
+Add structured JSON logs with:
+
+- Timestamp.
+- Request ID.
+- Device ID.
+- Endpoint.
+- Status code.
+- Error information.
+
+## 24.7 Container and deployment improvements
+
+Add:
+
+- Production health checks.
+- Resource limits.
+- CI/CD.
+- Container image scanning.
+- Deployment configuration.
+
+These are intentionally not required for the core three-hour exercise.
+
+---
+
+# 25. AI Usage
+
+AI tools were used during development, in accordance with the assignment's AI policy.
+
+## AI tools used
+
+- Google Gemini via the Antigravity AI coding assistant.
+- ChatGPT for development assistance and review.
+
+## What AI was used for
+
+AI assistance was used for:
+
+- Project structure and initial scaffolding.
+- Express.js API implementation.
+- Jest/Supertest test structure.
+- Simulator logic.
+- Telemetry generation.
+- Dashboard HTML/CSS/JavaScript.
+- Documentation and code review.
+
+## Example of an AI-generated approach that was improved
+
+An initial approach considered maintaining an explicit online/offline flag and periodically scanning all devices with a background timer.
+
+The implementation was instead structured around dynamic status calculation:
+
+```text
+current time - last heartbeat <= timeout
+```
+
+This avoids maintaining a second piece of state that could become stale and makes the timeout boundary easier to test.
+
+A controllable clock was also introduced into the service so the tests can verify:
+
+```text
+30.0 seconds → ONLINE
+30.1 seconds → OFFLINE
+```
+
+without waiting 30 seconds in real time.
+
+## Verification
+
+The Node.js automated test suite was executed against the project and the current result is:
+
+```text
+2 test suites passed
+19 tests passed
+0 tests failed
+```
+
+The implementation should still be reviewed and understood by the candidate before submission, especially the timeout logic, simulator behavior, API responses, and test cases.
+
+---
+
+# 26. Git and Commit History
+
+The assignment evaluates Git usage as part of the engineering process.
+
+Meaningful commits should describe logical stages of development.
+
+Recommended commit sequence:
+
+```text
+Initial Node.js project setup
+Implement device registration API
+Implement heartbeat ingestion
+Implement 30-second status calculation
+Add device listing and summary APIs
+Add device detail endpoint
+Add simulator
+Add automated tests
+Add dashboard
+Improve error handling
+Add Docker support
+Complete README documentation
+```
+
+Avoid using a single vague commit such as:
+
+```text
+final project
+```
+
+for the entire implementation.
+
+A reviewer should be able to understand how the project evolved.
+
+---
+
+# 27. Troubleshooting
+
+## Server does not start
+
+Check Node.js:
+
+```bash
+node --version
+```
+
+Then reinstall dependencies:
+
+```bash
+npm ci
+```
+
+Try:
+
+```bash
+npm start
+```
+
+## Port 8000 is already in use
+
+Change the port:
+
+### PowerShell
+
+```powershell
+$env:PORT="8080"
+npm start
+```
+
+### Linux/macOS
+
+```bash
+PORT=8080 npm start
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8080/
+```
+
+## Simulator cannot connect
+
+Make sure the server is running first:
+
+```bash
+npm start
+```
+
+Then, in another terminal:
+
+```bash
+npm run simulator
+```
+
+## Device remains offline
+
+Check that:
+
+1. The device was registered.
+2. The simulator is running.
+3. Heartbeat requests return HTTP 200.
+4. The device ID matches the registered ID.
+5. The server is running on the same URL configured by the simulator.
+
+## Tests fail after modifying code
+
+Run:
+
+```bash
+npm test
+```
+
+Run the live smoke test only after starting the server:
+
+```bash
+npm start
+```
+
+In another terminal:
+
+```bash
+npm run smoke
+```
+
+The smoke test registers five devices, sends heartbeats to four, and verifies the expected summary.
+
+---
+
+# 28. Submission Checklist
+
+Before submitting the repository, verify every item below.
+
+## Application
+
+- [ ] `npm install` / `npm ci` works.
+- [ ] `npm start` starts the server.
+- [ ] Dashboard opens at `/`.
+- [ ] `POST /devices` works.
+- [ ] `POST /devices/:id/heartbeat` works.
+- [ ] `GET /devices` works.
+- [ ] `GET /devices/:id` works.
+- [ ] `GET /summary` works.
+- [ ] `GET /health` works.
+- [ ] Unknown devices return `404`.
+- [ ] Duplicate IDs return `409`.
+- [ ] Invalid registration data returns `400`.
+
+## Timeout behavior
+
+- [ ] Newly registered devices are `OFFLINE`.
+- [ ] Heartbeat makes a device `ONLINE`.
+- [ ] Device remains `ONLINE` at exactly 30 seconds.
+- [ ] Device becomes `OFFLINE` after 30 seconds.
+- [ ] A new heartbeat brings it back `ONLINE`.
+
+## Simulator
+
+- [ ] At least five devices are simulated.
+- [ ] Heartbeats are sent periodically.
+- [ ] `stop <id>` works.
+- [ ] Stopped device becomes `OFFLINE` after the timeout.
+- [ ] `resume <id>` brings the device back `ONLINE`.
+- [ ] `summary` works.
+- [ ] `quit` shuts down the simulator.
+
+## Tests
+
+Run:
+
+```bash
+npm test
+```
+
+Expected current result:
+
+```text
+2 test suites passed
+19 tests passed
+```
+
+## Documentation
+
+- [ ] README explains the project.
+- [ ] Architecture is documented.
+- [ ] Prerequisites are documented.
+- [ ] Build/install instructions are documented.
+- [ ] Server run instructions are documented.
+- [ ] Simulator instructions are documented.
+- [ ] Test instructions are documented.
+- [ ] API examples are included.
+- [ ] Assumptions are documented.
+- [ ] Known limitations are documented.
+- [ ] Future improvements are documented.
+- [ ] AI usage is disclosed.
+
+## Repository
+
+- [ ] `.gitignore` is present.
+- [ ] `node_modules` is not committed.
+- [ ] `.env`/secrets are not committed.
+- [ ] Git history contains meaningful commits.
+- [ ] Repository URL is ready for submission.
+- [ ] Final committed version is the version being submitted.
+
+---
+
+## Final Architecture Summary
+
+The project intentionally keeps the implementation small:
+
+```text
+                    ┌─────────────────────┐
+                    │  Simulated Devices  │
+                    │  5+ devices / 5 sec │
+                    └──────────┬──────────┘
+                               │
+                               │ Heartbeats
+                               ▼
+                    ┌─────────────────────┐
+                    │   Express REST API  │
+                    │      src/app.js     │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │ DeviceFleetService  │
+                    │    src/service.js   │
+                    │                     │
+                    │ Validation          │
+                    │ Heartbeat handling  │
+                    │ Status calculation  │
+                    │ Fleet summary       │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │   DeviceStorage     │
+                    │    src/storage.js   │
+                    │     Map / RAM       │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+                    ▼                     ▼
+             REST API clients       Web Dashboard
+             curl / Postman         Browser UI
+```
+
+The core design goal is to satisfy the assignment with a **clear, testable, understandable Node.js implementation**, rather than adding unnecessary infrastructure.
