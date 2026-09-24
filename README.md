@@ -306,6 +306,9 @@ heartbeat simnovus/
 ├── .gitignore
 ├── test_smoke.js
 │
+├── assets/
+│   ├── dashboard.png
+│   
 ├── src/
 │   ├── app.js
 │   ├── config.js
