@@ -143,6 +143,9 @@ The browser dashboard provides:
 - Telemetry display.
 - Automatic refresh.
 
+### Dashboard Screenshot
+
+<img src="./assets/dashboard.png" alt="Mini Device Fleet Monitor Dashboard" width="100%"/>
 ---
 
 # 4. Technology Stack
