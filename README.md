@@ -1803,4 +1803,4 @@ The project intentionally keeps the implementation small:
              curl / Postman         Browser UI
 ```
 
-The core design goal is to satisfy the assignment with a **clear, testable, understandable Node.js implementation**, rather than adding unnecessary infrastructure.
+
